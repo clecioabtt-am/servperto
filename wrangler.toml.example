@@ -1,0 +1,12 @@
+name = "servperto"
+compatibility_date = "2026-08-12"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "servperto-db"
+database_id = "COLOQUE_SEU_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "servperto-media"
