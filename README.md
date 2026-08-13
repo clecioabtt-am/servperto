@@ -1,12 +1,15 @@
 # ServPerto 📍
 MVP da plataforma para conectar clientes a prestadores de serviços próximos em Manaus.
 
-## Stack
-- React + Vite + TypeScript
-- Cloudflare Pages + Pages Functions
-- Cloudflare D1
-- Cloudflare R2
-- Mapa previsto: Leaflet/OpenStreetMap
+## Arquitetura atualizada
+- React + Vite + TypeScript no frontend
+- Cloudflare Worker como backend
+- Workers Static Assets para servir o frontend
+- Cloudflare D1 para banco de dados (binding `DB`)
+- Cloudflare R2 para mídia (binding `MEDIA`, será ativado quando necessário)
+- Leaflet/OpenStreetMap para o mapa
+
+> Importante: no painel do Cloudflare **não é necessário existir um preset chamado Vite**. O Vite é apenas a ferramenta de build do projeto. Para Git deploy, use **No framework / None** e configure os comandos abaixo.
 
 ## Rodar localmente
 ```bash
@@ -14,17 +17,26 @@ npm install
 npm run dev
 ```
 
-## Deploy
-1. Envie esta pasta para um repositório GitHub.
-2. No Cloudflare Pages, conecte o repositório.
-3. Build command: `npm run build`.
-4. Output: `dist`.
-5. Crie D1 `servperto-db` e R2 `servperto-media`.
-6. Configure bindings `DB` e `MEDIA` no projeto Pages.
-7. Execute `migrations/0001_init.sql` no D1.
+## Deploy manual
+```bash
+npm install
+npm run deploy
+```
 
-## MVP incluído
-Landing page responsiva, estrutura inicial de API, endpoint `/api/health`, listagem `/api/professionals` e schema inicial D1.
+## Deploy pelo GitHub no Cloudflare Workers Builds
+1. Conecte o repositório GitHub ao Worker `servperto`.
+2. Framework preset: **None / No framework** (se esse campo aparecer).
+3. Root directory: `/` (ou deixe vazio se o repositório já abre nesta pasta).
+4. Build command: `npm run build`.
+5. Deploy command: `npx wrangler deploy`.
+6. O `wrangler.jsonc` publica `dist` como Static Assets e encaminha `/api/*` para `src/worker.ts`.
 
-## Próximas etapas
-Autenticação, cadastro completo de profissionais, geolocalização/mapa, avaliações, pedidos de orçamento, assinatura/Asaas e painel administrativo.
+## D1
+Crie o banco `servperto-db`, execute `migrations/0001_init.sql` e adicione ao Worker um binding chamado `DB`.
+
+## R2
+Quando formos ativar fotos/portfólio, crie o bucket `servperto-media` e adicione um binding chamado `MEDIA`.
+
+## Endpoints iniciais
+- `/api/health` — testa o Worker.
+- `/api/professionals` — lista profissionais ativos; exige D1 vinculado como `DB`.
