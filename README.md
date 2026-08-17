@@ -1,42 +1,33 @@
-# ServPerto 📍
-MVP da plataforma para conectar clientes a prestadores de serviços próximos em Manaus.
+# ServPerto — Workers + D1 + Google Maps
 
-## Arquitetura atualizada
-- React + Vite + TypeScript no frontend
-- Cloudflare Worker como backend
-- Workers Static Assets para servir o frontend
-- Cloudflare D1 para banco de dados (binding `DB`)
-- Cloudflare R2 para mídia (binding `MEDIA`, será ativado quando necessário)
-- Leaflet/OpenStreetMap para o mapa
+MVP para conectar clientes e prestadores em Manaus com cadastro, login, recuperação por código de 6 dígitos, geolocalização e mapa Google personalizado.
 
-> Importante: no painel do Cloudflare **não é necessário existir um preset chamado Vite**. O Vite é apenas a ferramenta de build do projeto. Para Git deploy, use **No framework / None** e configure os comandos abaixo.
+## Arquitetura
+- React + Vite (build local/CI)
+- Cloudflare Workers + Static Assets
+- Cloudflare D1 (usuários, profissionais, serviços, avaliações)
+- Google Maps JavaScript API + Advanced Markers
+- Geolocation API do navegador para posição do cliente
 
-## Rodar localmente
-```bash
-npm install
-npm run dev
-```
-
-## Deploy manual
-```bash
-npm install
-npm run deploy
-```
-
-## Deploy pelo GitHub no Cloudflare Workers Builds
-1. Conecte o repositório GitHub ao Worker `servperto`.
-2. Framework preset: **None / No framework** (se esse campo aparecer).
-3. Root directory: `/` (ou deixe vazio se o repositório já abre nesta pasta).
-4. Build command: `npm run build`.
-5. Deploy command: `npx wrangler deploy`.
-6. O `wrangler.jsonc` publica `dist` como Static Assets e encaminha `/api/*` para `src/worker.ts`.
+## Deploy Cloudflare
+Build: `npm run build`
+Deploy: `npx wrangler deploy`
+Framework preset: None / No framework
 
 ## D1
-Crie o banco `servperto-db`, execute `migrations/0001_init.sql` e adicione ao Worker um binding chamado `DB`.
+Crie `servperto-db`, execute `migrations/0001_init.sql` e adicione ao Worker o binding `DB`.
 
-## R2
-Quando formos ativar fotos/portfólio, crie o bucket `servperto-media` e adicione um binding chamado `MEDIA`.
+## Google Maps
+No Google Cloud, crie um projeto com faturamento, habilite Maps JavaScript API e Geocoding API, crie uma API key restrita por HTTP referrers e um Map ID.
+No Cloudflare > Worker servperto > Settings > Build > Variables and secrets, adicione como variáveis de BUILD:
+- `VITE_GOOGLE_MAPS_API_KEY`
+- `VITE_GOOGLE_MAP_ID`
+Depois faça novo deploy.
 
-## Endpoints iniciais
-- `/api/health` — testa o Worker.
-- `/api/professionals` — lista profissionais ativos; exige D1 vinculado como `DB`.
+Observação: variáveis `VITE_*` são compiladas no frontend e ficam visíveis no navegador. Por isso a segurança depende das restrições de domínio/API aplicadas à chave no Google Cloud.
+
+## Privacidade da localização do prestador
+O formulário oferece opção para publicar o ponto exato. Se o prestador não autorizar, a API reduz a precisão antes de salvar a coordenada pública do perfil. Para endereços residenciais, recomenda-se não publicar o ponto exato.
+
+## Recuperação
+O servidor gera um código de 6 dígitos, mostra uma única vez e armazena apenas o hash. Após 5 códigos incorretos, a recuperação fica bloqueada por 15 minutos.
