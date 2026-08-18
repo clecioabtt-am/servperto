@@ -2,11 +2,18 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "servperto",
   "main": "./src/worker.ts",
-  "compatibility_date": "2026-08-17",
+  "compatibility_date": "2026-08-18",
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "servperto-db",
+      "database_id": "efa1cabe-11be-4c46-accd-8619e6b72364"
+    }
+  ]
 }

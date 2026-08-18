@@ -1,33 +1,20 @@
-# ServPerto — Workers + D1 + Google Maps
+# ServPerto v0.5 — D1 conectado
 
-MVP para conectar clientes e prestadores em Manaus com cadastro, login, recuperação por código de 6 dígitos, geolocalização e mapa Google personalizado.
+Versão alinhada ao banco Cloudflare D1 `servperto-db`.
 
-## Arquitetura
-- React + Vite (build local/CI)
-- Cloudflare Workers + Static Assets
-- Cloudflare D1 (usuários, profissionais, serviços, avaliações)
-- Google Maps JavaScript API + Advanced Markers
-- Geolocation API do navegador para posição do cliente
+## Recursos desta versão
+- Cadastro de cliente e prestador gravando no D1.
+- Senhas protegidas com PBKDF2 + salt armazenado no próprio hash.
+- Código de recuperação de 6 dígitos protegido por hash e bloqueio por tentativas.
+- Login com criação de sessão de 7 dias.
+- Recuperação de senha revogando sessões antigas.
+- Cadastro do prestador em `provider_profiles` + `provider_services`.
+- Endpoint `/api/db-health` para verificar a conexão com o D1.
+- Listagem de profissionais para o mapa usando a estrutura real do banco.
+- Binding D1 versionado em `wrangler.jsonc`.
 
-## Deploy Cloudflare
-Build: `npm run build`
-Deploy: `npx wrangler deploy`
-Framework preset: None / No framework
+## Testes após o deploy
+- `/api/health`
+- `/api/db-health`
 
-## D1
-Crie `servperto-db`, execute `migrations/0001_init.sql` e adicione ao Worker o binding `DB`.
-
-## Google Maps
-No Google Cloud, crie um projeto com faturamento, habilite Maps JavaScript API e Geocoding API, crie uma API key restrita por HTTP referrers e um Map ID.
-No Cloudflare > Worker servperto > Settings > Build > Variables and secrets, adicione como variáveis de BUILD:
-- `VITE_GOOGLE_MAPS_API_KEY`
-- `VITE_GOOGLE_MAP_ID`
-Depois faça novo deploy.
-
-Observação: variáveis `VITE_*` são compiladas no frontend e ficam visíveis no navegador. Por isso a segurança depende das restrições de domínio/API aplicadas à chave no Google Cloud.
-
-## Privacidade da localização do prestador
-O formulário oferece opção para publicar o ponto exato. Se o prestador não autorizar, a API reduz a precisão antes de salvar a coordenada pública do perfil. Para endereços residenciais, recomenda-se não publicar o ponto exato.
-
-## Recuperação
-O servidor gera um código de 6 dígitos, mostra uma única vez e armazena apenas o hash. Após 5 códigos incorretos, a recuperação fica bloqueada por 15 minutos.
+O banco remoto já foi criado no painel. Não execute novamente a migration no banco existente sem necessidade.
