@@ -5,6 +5,7 @@ interface Env {
 }
 
 const enc = new TextEncoder();
+const PBKDF2_ITERATIONS = 100_000; // Limite suportado pelo Cloudflare Workers Web Crypto.
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -31,7 +32,7 @@ function randomHex(bytes = 16) {
 async function pbkdf2(secret: string, salt: string) {
   const key = await crypto.subtle.importKey('raw', enc.encode(secret), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt: enc.encode(salt), iterations: 150000, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: enc.encode(salt), iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
     key,
     256
   );
@@ -135,8 +136,6 @@ export default {
       if (exists) return json({ error: 'Este nome de login já está em uso.' }, { status: 409 });
 
       const recoveryCode = makeRecoveryCode();
-      const passwordHash = await hashSecret(String(b.password));
-      const recoveryHash = await hashSecret(recoveryCode);
       const lat = Number.isFinite(Number(b.latitude)) ? Number(b.latitude) : null;
       const lng = Number.isFinite(Number(b.longitude)) ? Number(b.longitude) : null;
       const exact = b.showExactLocation === '1' || b.showExactLocation === true;
@@ -145,6 +144,11 @@ export default {
       let userId: number | null = null;
       let stage = 'users';
       try {
+        // Hashes são gerados dentro do try para que qualquer erro criptográfico
+        // retorne JSON de diagnóstico em vez de causar Cloudflare Error 1101.
+        const passwordHash = await hashSecret(String(b.password));
+        const recoveryHash = await hashSecret(recoveryCode);
+
         const inserted = await db.prepare(`
           INSERT INTO users (
             role, full_name, phone, cep, address, city, state, username,
