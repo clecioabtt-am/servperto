@@ -89,6 +89,30 @@ export default {
       }
     }
 
+    if (url.pathname === '/api/schema-health') {
+      if (!env.DB) return json({ ok: false, database: false, error: 'Binding DB não encontrado.' }, { status: 503 });
+      try {
+        const expected: Record<string, string[]> = {
+          users: ['id','role','full_name','phone','cep','address','city','state','username','password_hash','recovery_code_hash','recovery_attempts','active','created_at','updated_at'],
+          provider_profiles: ['id','user_id','professional_name','description','latitude','longitude','exact_location_public','average_rating','total_reviews','verified','available','plan','created_at','updated_at'],
+          service_categories: ['id','name','slug','active','created_at'],
+          provider_services: ['id','provider_id','category_id','title','description','active','created_at','updated_at']
+        };
+        const report: Record<string, any> = {};
+        let healthy = true;
+        for (const [table, required] of Object.entries(expected)) {
+          const rows: any = await env.DB.prepare(`PRAGMA table_info(${table})`).all();
+          const columns = (rows.results || []).map((r: any) => String(r.name));
+          const missing = required.filter(c => !columns.includes(c));
+          if (!columns.length || missing.length) healthy = false;
+          report[table] = { exists: columns.length > 0, columns, missing };
+        }
+        return json({ ok: healthy, database: true, schema: report }, { status: healthy ? 200 : 500 });
+      } catch (e: any) {
+        return json({ ok: false, database: true, error: 'Falha ao verificar schema.', detail: String(e?.message || e) }, { status: 500 });
+      }
+    }
+
     if (url.pathname.startsWith('/api/') && !env.DB) {
       return json({ error: 'Banco D1 não vinculado. Adicione o binding DB ao Worker servperto.' }, { status: 503 });
     }
@@ -118,6 +142,8 @@ export default {
       const exact = b.showExactLocation === '1' || b.showExactLocation === true;
       const pub = publicCoordinates(lat, lng, exact);
 
+      let userId: number | null = null;
+      let stage = 'users';
       try {
         const inserted = await db.prepare(`
           INSERT INTO users (
@@ -137,9 +163,10 @@ export default {
           recoveryHash
         ).run();
 
-        const userId = Number(inserted.meta.last_row_id);
+        userId = Number(inserted.meta.last_row_id);
 
         if (role === 'provider') {
+          stage = 'service_categories';
           const categoryName = String(b.category || 'Serviços').trim();
           const categorySlug = slugify(categoryName);
 
@@ -150,6 +177,7 @@ export default {
 
           const category: any = await db.prepare('SELECT id FROM service_categories WHERE slug = ?').bind(categorySlug).first();
 
+          stage = 'provider_profiles';
           const profile = await db.prepare(`
             INSERT INTO provider_profiles (
               user_id, professional_name, description, latitude, longitude,
@@ -167,6 +195,7 @@ export default {
 
           const providerId = Number(profile.meta.last_row_id);
           if (category?.id) {
+            stage = 'provider_services';
             await db.prepare(`
               INSERT INTO provider_services (
                 provider_id, category_id, title, description, active, created_at, updated_at
@@ -177,7 +206,15 @@ export default {
 
         return json({ ok: true, role, recoveryCode }, { status: 201 });
       } catch (e: any) {
-        return json({ error: 'Não foi possível criar o cadastro.', detail: String(e?.message || e) }, { status: 500 });
+        // Se o cadastro do prestador falhar depois de criar users, removemos o registro parcial.
+        if (userId) {
+          try { await db.prepare('DELETE FROM users WHERE id = ?').bind(userId).run(); } catch {}
+        }
+        return json({
+          error: 'Não foi possível criar o cadastro.',
+          detail: `Falha na etapa ${stage}: ${String(e?.message || e)}`,
+          stage
+        }, { status: 500 });
       }
     }
 

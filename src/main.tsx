@@ -30,7 +30,7 @@ function distanceKm(aLat:number,aLng:number,bLat:number,bLng:number){
 async function api(path:string, options?:RequestInit){
   const res=await fetch(path,{...options,headers:{'content-type':'application/json',...(options?.headers||{})}});
   const data=await res.json().catch(()=>({}));
-  if(!res.ok) throw new Error(data.error||data.detail||'Não foi possível concluir a operação.');
+  if(!res.ok) throw new Error(data.detail||data.error||'Não foi possível concluir a operação.');
   return data;
 }
 
