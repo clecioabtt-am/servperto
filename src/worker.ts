@@ -71,6 +71,20 @@ function roleFromPayload(value: unknown) {
   return value === 'professional' || value === 'provider' ? 'provider' : 'client';
 }
 
+async function sessionUser(request: Request, db: D1Database) {
+  const auth = request.headers.get('authorization') || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (!token) return null;
+  const tokenHash = await sha256Hex(token);
+  const row: any = await db.prepare(`
+    SELECT u.id, u.full_name, u.username, u.role, u.phone, u.address, u.city, s.id AS session_id, s.expires_at
+    FROM sessions s JOIN users u ON u.id = s.user_id
+    WHERE s.token_hash = ? AND u.active = 1
+  `).bind(tokenHash).first();
+  if (!row || Date.parse(row.expires_at) <= Date.now()) return null;
+  return row;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -220,6 +234,31 @@ export default {
           stage
         }, { status: 500 });
       }
+    }
+
+
+    if (url.pathname === '/api/me' && request.method === 'GET') {
+      const user: any = await sessionUser(request, db);
+      if (!user) return json({ error: 'Sessão inválida ou expirada.' }, { status: 401 });
+      const base = { id: user.id, name: user.full_name, username: user.username, role: user.role };
+      if (user.role !== 'provider') return json({ user: base });
+      const provider: any = await db.prepare(`
+        SELECT pp.id, pp.professional_name, pp.description, pp.latitude, pp.longitude, pp.average_rating, pp.total_reviews, pp.verified, pp.available, pp.plan, u.phone, u.address, u.city
+        FROM provider_profiles pp JOIN users u ON u.id = pp.user_id WHERE pp.user_id = ?
+      `).bind(user.id).first();
+      const services: any = provider ? await db.prepare(`
+        SELECT ps.id, ps.title, ps.description, ps.active, sc.name AS category
+        FROM provider_services ps JOIN service_categories sc ON sc.id = ps.category_id
+        WHERE ps.provider_id = ? ORDER BY ps.created_at DESC
+      `).bind(provider.id).all() : { results: [] };
+      return json({ user: base, provider, services: services.results || [] });
+    }
+
+    if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
+      const auth = request.headers.get('authorization') || '';
+      const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+      if (token) { const tokenHash = await sha256Hex(token); await db.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(tokenHash).run(); }
+      return json({ ok: true });
     }
 
     if (url.pathname === '/api/auth/login' && request.method === 'POST') {

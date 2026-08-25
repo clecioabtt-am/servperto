@@ -27,3 +27,11 @@ Não é necessária variável ou secret do Google Maps.
 - Geolocalização do cliente: API nativa do navegador
 
 Para produção em escala, troque os tiles/geocoder públicos por um provedor compatível sem alterar a arquitetura do mapa.
+
+
+## v0.6.3
+- Login abre painel autenticado automaticamente.
+- Sessão persistida por token.
+- Endpoint /api/me para carregar perfil do prestador.
+- Painel do prestador com resumo, perfil, serviços, avaliações e plano.
+- Logout revoga a sessão no D1.
