@@ -1,20 +1,29 @@
-# ServPerto v0.5 — D1 conectado
+# ServPerto v0.6
 
-Versão alinhada ao banco Cloudflare D1 `servperto-db`.
+Versão Cloudflare Workers + D1 com mapa Leaflet/OpenStreetMap, sem dependência do Google Maps.
 
-## Recursos desta versão
-- Cadastro de cliente e prestador gravando no D1.
-- Senhas protegidas com PBKDF2 + salt armazenado no próprio hash.
-- Código de recuperação de 6 dígitos protegido por hash e bloqueio por tentativas.
-- Login com criação de sessão de 7 dias.
-- Recuperação de senha revogando sessões antigas.
-- Cadastro do prestador em `provider_profiles` + `provider_services`.
-- Endpoint `/api/db-health` para verificar a conexão com o D1.
-- Listagem de profissionais para o mapa usando a estrutura real do banco.
-- Binding D1 versionado em `wrangler.jsonc`.
+## Deploy
 
-## Testes após o deploy
-- `/api/health`
-- `/api/db-health`
+```bash
+npm install
+npm run build
+npx wrangler deploy
+```
 
-O banco remoto já foi criado no painel. Não execute novamente a migration no banco existente sem necessidade.
+## Cloudflare
+
+O Worker deve manter os bindings:
+
+- `ASSETS` para os arquivos estáticos
+- `DB` para o D1 `servperto-db`
+
+Não é necessária variável ou secret do Google Maps.
+
+## Mapa
+
+- Frontend: Leaflet
+- Tiles: OpenStreetMap
+- Geocodificação de cadastro: endpoint `/api/geocode`, usando Nominatim para baixo volume
+- Geolocalização do cliente: API nativa do navegador
+
+Para produção em escala, troque os tiles/geocoder públicos por um provedor compatível sem alterar a arquitetura do mapa.

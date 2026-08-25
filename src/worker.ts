@@ -246,6 +246,38 @@ export default {
       return json({ ok: true });
     }
 
+    if (url.pathname === '/api/geocode' && request.method === 'GET') {
+      const q = String(url.searchParams.get('q') || '').trim();
+      if (q.length < 5 || q.length > 220) return json({ error: 'Endereço inválido.' }, { status: 400 });
+      try {
+        const endpoint = new URL('https://nominatim.openstreetmap.org/search');
+        endpoint.searchParams.set('q', q);
+        endpoint.searchParams.set('format', 'jsonv2');
+        endpoint.searchParams.set('limit', '1');
+        endpoint.searchParams.set('countrycodes', 'br');
+        endpoint.searchParams.set('addressdetails', '1');
+        const res = await fetch(endpoint.toString(), {
+          headers: {
+            'User-Agent': 'ServPerto/0.6 (Cloudflare Worker; contact: admin@servperto.local)',
+            'Accept-Language': 'pt-BR,pt;q=0.9'
+          }
+        });
+        if (!res.ok) return json({ error: 'Serviço de localização temporariamente indisponível.' }, { status: 502 });
+        const rows: any[] = await res.json();
+        const hit = rows?.[0];
+        if (!hit) return json({ error: 'Endereço não encontrado.' }, { status: 404 });
+        return json({
+          ok: true,
+          latitude: Number(hit.lat),
+          longitude: Number(hit.lon),
+          displayName: hit.display_name || null,
+          source: 'OpenStreetMap/Nominatim'
+        });
+      } catch (e: any) {
+        return json({ error: 'Falha ao localizar endereço.', detail: String(e?.message || e) }, { status: 500 });
+      }
+    }
+
     if (url.pathname === '/api/professionals' && request.method === 'GET') {
       const { results } = await db.prepare(`
         SELECT
