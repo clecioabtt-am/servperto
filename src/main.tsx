@@ -166,11 +166,16 @@ function App(){
   const [geoHelp,setGeoHelp]=useState(false); const [geoLoading,setGeoLoading]=useState(false);
   useEffect(()=>{api('/api/professionals').then(setProfessionals).catch(()=>setProfessionals([]))},[]);
   useEffect(()=>{const token=localStorage.getItem('servperto_token'); if(!token){setAuthLoading(false);return} api('/api/me',{headers:{authorization:`Bearer ${token}`}}).then(setSession).catch(()=>localStorage.removeItem('servperto_token')).finally(()=>setAuthLoading(false))},[]);
+
+  // Hooks precisam ser executados na mesma ordem em todas as renderizações.
+  // Antes, este useMemo ficava depois dos returns condicionais de authLoading/session,
+  // o que causava "Rendered more hooks than during the previous render" e tela em branco.
+  const shown=useMemo(()=>professionals.filter(p=>!query||`${p.name} ${p.category}`.toLowerCase().includes(query.toLowerCase())).map(p=>({...p,distanceKm:userPos?distanceKm(userPos.lat,userPos.lng,p.latitude,p.longitude):undefined})).sort((a,b)=>userPos?(a.distanceKm!-b.distanceKm!):(b.rating-a.rating)),[professionals,query,userPos]);
+
   async function handleLogin(_user:LoggedUser,token:string){try{const data=await api('/api/me',{headers:{authorization:`Bearer ${token}`}});setSession(data)}catch{localStorage.removeItem('servperto_token')}}
   async function logout(){const token=localStorage.getItem('servperto_token'); if(token) await api('/api/auth/logout',{method:'POST',headers:{authorization:`Bearer ${token}`}}).catch(()=>{}); localStorage.removeItem('servperto_token'); setSession(null)}
   if(authLoading) return <main className="loadingPage"><div>📍</div><b>Carregando ServPerto...</b></main>;
   if(session) return <Dashboard data={session} onLogout={logout}/>;
-  const shown=useMemo(()=>professionals.filter(p=>!query||`${p.name} ${p.category}`.toLowerCase().includes(query.toLowerCase())).map(p=>({...p,distanceKm:userPos?distanceKm(userPos.lat,userPos.lng,p.latitude,p.longitude):undefined})).sort((a,b)=>userPos?(a.distanceKm!-b.distanceKm!):(b.rating-a.rating)),[professionals,query,userPos]);
   async function enableLocation(){
     setGeoMsg(''); setGeoHelp(false);
     if(!window.isSecureContext){setGeoMsg('A localização só funciona em conexão segura (HTTPS).');setGeoHelp(true);return}
