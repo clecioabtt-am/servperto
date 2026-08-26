@@ -214,11 +214,17 @@ export default {
           const providerId = Number(profile.meta.last_row_id);
           if (category?.id) {
             stage = 'provider_services';
-            await db.prepare(`
-              INSERT INTO provider_services (
-                provider_id, category_id, title, description, active, created_at, updated_at
-              ) VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            `).bind(providerId, category.id, categoryName, String(b.description || '').trim()).run();
+            const description = String(b.description || '').trim();
+            const extraServices = String(b.services || '')
+              .split(',').map((x: string) => x.trim()).filter(Boolean).slice(0, 12);
+            const titles = Array.from(new Set([categoryName, ...extraServices]));
+            for (const title of titles) {
+              await db.prepare(`
+                INSERT INTO provider_services (
+                  provider_id, category_id, title, description, active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+              `).bind(providerId, category.id, title, description).run();
+            }
           }
         }
 
@@ -358,6 +364,50 @@ export default {
       }
     }
 
+    const professionalMatch = url.pathname.match(/^\/api\/professionals\/(\d+)$/);
+    if (professionalMatch && request.method === 'GET') {
+      const providerId = Number(professionalMatch[1]);
+      const professional: any = await db.prepare(`
+        SELECT
+          pp.id,
+          COALESCE(pp.professional_name, u.full_name) AS name,
+          COALESCE(sc.name, ps.title, 'Serviços') AS category,
+          COALESCE(pp.description, ps.description, '') AS description,
+          u.phone,
+          u.city,
+          CASE WHEN pp.exact_location_public = 1 THEN u.address ELSE NULL END AS address,
+          pp.average_rating AS rating,
+          pp.total_reviews AS review_count,
+          pp.latitude,
+          pp.longitude,
+          pp.available,
+          pp.verified
+        FROM provider_profiles pp
+        JOIN users u ON u.id = pp.user_id
+        LEFT JOIN provider_services ps ON ps.provider_id = pp.id AND ps.active = 1
+        LEFT JOIN service_categories sc ON sc.id = ps.category_id AND sc.active = 1
+        WHERE pp.id = ? AND u.active = 1
+        GROUP BY pp.id
+      `).bind(providerId).first();
+      if (!professional) return json({ error: 'Profissional não encontrado.' }, { status: 404 });
+      const services: any = await db.prepare(`
+        SELECT ps.id, ps.title, ps.description, sc.name AS category
+        FROM provider_services ps
+        JOIN service_categories sc ON sc.id = ps.category_id
+        WHERE ps.provider_id = ? AND ps.active = 1
+        ORDER BY ps.created_at ASC
+      `).bind(providerId).all();
+      const reviews: any = await db.prepare(`
+        SELECT r.id, r.rating, r.comment, r.created_at, u.full_name AS client_name
+        FROM reviews r
+        JOIN users u ON u.id = r.client_id
+        WHERE r.provider_id = ?
+        ORDER BY r.created_at DESC
+        LIMIT 10
+      `).bind(providerId).all();
+      return json({ professional, services: services.results || [], reviews: reviews.results || [] });
+    }
+
     if (url.pathname === '/api/professionals' && request.method === 'GET') {
       const { results } = await db.prepare(`
         SELECT
@@ -371,7 +421,9 @@ export default {
           pp.average_rating AS rating,
           pp.total_reviews AS review_count,
           pp.latitude,
-          pp.longitude
+          pp.longitude,
+          pp.available,
+          pp.verified
         FROM provider_profiles pp
         JOIN users u ON u.id = pp.user_id
         LEFT JOIN provider_services ps ON ps.provider_id = pp.id AND ps.active = 1

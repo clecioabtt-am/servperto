@@ -6,184 +6,115 @@ import './style.css';
 
 type Role = 'client' | 'professional';
 type Professional = {
-  id: number;
-  name: string;
-  category: string;
-  description?: string;
-  phone?: string;
-  city?: string;
-  address?: string;
-  rating: number;
-  review_count: number;
-  latitude: number;
-  longitude: number;
-  distanceKm?: number;
+  id:number; name:string; category:string; description?:string; phone?:string; city?:string; address?:string;
+  rating:number; review_count:number; latitude:number; longitude:number; available?:number; verified?:number; distanceKm?:number;
 };
+type LoggedUser = { id:number; name:string; username:string; role:'provider'|'client' };
+type ProviderDashboard = {
+  user:LoggedUser;
+  provider?:{ id:number; professional_name:string; description?:string; latitude?:number; longitude?:number; average_rating:number; total_reviews:number; verified:number; available:number; plan:string; phone?:string; address?:string; city?:string };
+  services?:Array<{id:number; title:string; description?:string; category:string; active:number}>;
+};
+type ProfileDetail = { professional:Professional; services:Array<{id:number;title:string;description?:string;category:string}>; reviews:Array<{id:number;rating:number;comment?:string;created_at:string;client_name:string}> };
+
+const serviceExamples=['Eletricista','Encanador','Técnico em informática','Pintor','Pedreiro','Diarista','Mecânico','Refrigeração'];
 
 function distanceKm(aLat:number,aLng:number,bLat:number,bLng:number){
-  const r=6371, toRad=(v:number)=>v*Math.PI/180;
-  const dLat=toRad(bLat-aLat), dLng=toRad(bLng-aLng);
+  const r=6371,toRad=(v:number)=>v*Math.PI/180;
+  const dLat=toRad(bLat-aLat),dLng=toRad(bLng-aLng);
   const x=Math.sin(dLat/2)**2+Math.cos(toRad(aLat))*Math.cos(toRad(bLat))*Math.sin(dLng/2)**2;
   return r*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
 }
-
-async function api(path:string, options?:RequestInit){
+async function api(path:string,options?:RequestInit){
   const res=await fetch(path,{...options,headers:{'content-type':'application/json',...(options?.headers||{})}});
   const data=await res.json().catch(()=>({}));
   if(!res.ok) throw new Error(data.detail||data.error||'Não foi possível concluir a operação.');
   return data;
 }
-
+function escapeHtml(v:string){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]||c))}
 function pinIcon(kind:'provider'|'user',label?:string){
   const cls=kind==='user'?'map-pin user-pin':'map-pin provider-pin';
-  return L.divIcon({
-    className:'servperto-div-icon',
-    html:`<div class="${cls}" aria-label="${label||''}"><span>${kind==='user'?'●':'🧰'}</span></div>`,
-    iconSize:[40,48], iconAnchor:[20,46], popupAnchor:[0,-42]
-  });
+  return L.divIcon({className:'servperto-div-icon',html:`<div class="${cls}" aria-label="${escapeHtml(label||'')}"><span>${kind==='user'?'●':'🧰'}</span></div>`,iconSize:[40,48],iconAnchor:[20,46],popupAnchor:[0,-42]});
 }
 
-function MapPanel({professionals,userPosition,onEnableLocation}:{professionals:Professional[],userPosition:{lat:number,lng:number}|null,onEnableLocation:()=>void}){
-  const ref=useRef<HTMLDivElement>(null);
-  const mapRef=useRef<L.Map|null>(null);
-  const layerRef=useRef<L.LayerGroup|null>(null);
-
+function MapPanel({professionals,userPosition,onEnableLocation,onOpenProfile}:{professionals:Professional[],userPosition:{lat:number,lng:number}|null,onEnableLocation:()=>void,onOpenProfile:(id:number)=>void}){
+  const ref=useRef<HTMLDivElement>(null),mapRef=useRef<L.Map|null>(null),layerRef=useRef<L.LayerGroup|null>(null);
   useEffect(()=>{
-    if(!ref.current || mapRef.current) return;
+    if(!ref.current||mapRef.current)return;
     const map=L.map(ref.current,{zoomControl:false,attributionControl:true,minZoom:3}).setView([-3.1190,-60.0217],11);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-      maxZoom:19,
-      attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors'
-    }).addTo(map);
-    L.control.zoom({position:'bottomright'}).addTo(map);
-    layerRef.current=L.layerGroup().addTo(map);
-    mapRef.current=map;
-    setTimeout(()=>map.invalidateSize(),50);
-    return()=>{map.remove();mapRef.current=null;layerRef.current=null};
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors'}).addTo(map);
+    L.control.zoom({position:'bottomright'}).addTo(map); layerRef.current=L.layerGroup().addTo(map); mapRef.current=map;
+    setTimeout(()=>map.invalidateSize(),80); return()=>{map.remove();mapRef.current=null;layerRef.current=null};
   },[]);
-
   useEffect(()=>{
-    const map=mapRef.current, layer=layerRef.current;
-    if(!map||!layer) return;
-    layer.clearLayers();
-    const bounds:L.LatLngExpression[]=[];
+    const map=mapRef.current,layer=layerRef.current;if(!map||!layer)return;layer.clearLayers();const bounds:L.LatLngExpression[]=[];
     professionals.filter(p=>Number.isFinite(p.latitude)&&Number.isFinite(p.longitude)).forEach(p=>{
-      const pos:L.LatLngExpression=[p.latitude,p.longitude]; bounds.push(pos);
-      const rating=p.review_count?`${Number(p.rating||0).toFixed(1)} ⭐ (${p.review_count})`:'Novo profissional';
-      const distance=p.distanceKm!=null?` • ${p.distanceKm.toFixed(1)} km`:'';
-      L.marker(pos,{icon:pinIcon('provider',p.name)}).bindPopup(
-        `<div class="servperto-popup"><strong>${escapeHtml(p.name)}</strong><span>${escapeHtml(p.category)}</span><small>${escapeHtml(rating+distance)}</small></div>`
-      ).addTo(layer);
+      const pos:L.LatLngExpression=[p.latitude,p.longitude];bounds.push(pos);
+      const rating=p.review_count?`${Number(p.rating||0).toFixed(1)} ⭐ (${p.review_count})`:'Novo profissional'; const dist=p.distanceKm!=null?` • ${p.distanceKm.toFixed(1)} km`:'';
+      const marker=L.marker(pos,{icon:pinIcon('provider',p.name)}).bindPopup(`<div class="servperto-popup"><strong>${escapeHtml(p.name)}</strong><span>${escapeHtml(p.category)}</span><small>${escapeHtml(rating+dist)}</small><button data-provider="${p.id}" class="popup-profile">Ver perfil</button></div>`).addTo(layer);
+      marker.on('popupopen',()=>{setTimeout(()=>{const btn=document.querySelector(`[data-provider="${p.id}"]`) as HTMLButtonElement|null;btn?.addEventListener('click',()=>onOpenProfile(p.id),{once:true})},0)});
     });
-    if(userPosition){
-      const pos:L.LatLngExpression=[userPosition.lat,userPosition.lng]; bounds.push(pos);
-      L.marker(pos,{icon:pinIcon('user','Sua localização'),zIndexOffset:1000}).bindPopup('<b>Sua localização atual</b>').addTo(layer);
-      map.setView(pos,13,{animate:true});
-    } else if(bounds.length===1) map.setView(bounds[0],13);
-    else if(bounds.length>1) map.fitBounds(L.latLngBounds(bounds),{padding:[35,35],maxZoom:14});
-    else map.setView([-3.1190,-60.0217],11);
-  },[professionals,userPosition]);
-
-  return <div className="mapShell"><div ref={ref} className="leafletMap"/><div className="mapBrand"><strong>ServPerto Mapa</strong><span>OpenStreetMap • sem mensalidade</span></div><button className="locateBtn" onClick={onEnableLocation}>⌖ Minha localização</button></div>;
+    if(userPosition){const pos:L.LatLngExpression=[userPosition.lat,userPosition.lng];bounds.push(pos);L.marker(pos,{icon:pinIcon('user','Sua localização'),zIndexOffset:1000}).bindPopup('<b>Sua localização</b>').addTo(layer);map.setView(pos,13,{animate:true});}
+    else if(bounds.length===1)map.setView(bounds[0],13);else if(bounds.length>1)map.fitBounds(L.latLngBounds(bounds),{padding:[35,35],maxZoom:14});else map.setView([-3.1190,-60.0217],11);
+  },[professionals,userPosition,onOpenProfile]);
+  return <div className="mapShell"><div ref={ref} className="leafletMap"/><div className="mapBrand"><strong>ServPerto Mapa</strong><span>Profissionais cadastrados em Manaus</span></div><button className="locateBtn" onClick={onEnableLocation}>⌖ Minha localização</button></div>;
 }
-
-function escapeHtml(v:string){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]||c))}
 
 function RegisterModal({onClose}:{onClose:()=>void}){
-  const [role,setRole]=useState<Role|null>(null);
-  const [busy,setBusy]=useState(false);
-  const [message,setMessage]=useState('');
-  const [recovery,setRecovery]=useState('');
-  const [coords,setCoords]=useState<{lat:number,lng:number}|null>(null);
-
-  async function geocode(address:string){
-    const out=await api(`/api/geocode?q=${encodeURIComponent(address)}`);
-    if(out?.latitude!=null&&out?.longitude!=null) return {lat:Number(out.latitude),lng:Number(out.longitude)};
-    return null;
-  }
-
+  const [role,setRole]=useState<Role|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[recovery,setRecovery]=useState(''),[coords,setCoords]=useState<{lat:number,lng:number}|null>(null);
+  async function geocode(address:string){const out=await api(`/api/geocode?q=${encodeURIComponent(address)}`);return out?.latitude!=null&&out?.longitude!=null?{lat:Number(out.latitude),lng:Number(out.longitude)}:null}
   async function submit(e:FormEvent<HTMLFormElement>){
-    e.preventDefault(); setBusy(true); setMessage('');
-    const fd=new FormData(e.currentTarget);
-    const payload:any=Object.fromEntries(fd.entries()); payload.role=role;
+    e.preventDefault();setBusy(true);setMessage('');const fd=new FormData(e.currentTarget);const payload:any=Object.fromEntries(fd.entries());payload.role=role;
     try{
       if(role==='professional'){
-        const fullAddress=`${payload.address}, ${payload.cep}, ${payload.city}, AM, Brasil`;
-        const geo=coords||await geocode(fullAddress).catch(()=>null);
-        if(!geo){
-          setMessage('Não conseguimos localizar esse endereço no mapa. Use “localização atual” ou confira endereço/CEP.');
-          setBusy(false); return;
-        }
-        payload.latitude=geo.lat; payload.longitude=geo.lng;
-      } else if(coords){ payload.latitude=coords.lat; payload.longitude=coords.lng; }
-      const out=await api('/api/auth/register',{method:'POST',body:JSON.stringify(payload)});
-      setRecovery(out.recoveryCode);
+        const geo=coords||await geocode(`${payload.address}, ${payload.cep}, ${payload.city}, AM, Brasil`).catch(()=>null);
+        if(!geo){setMessage('Não conseguimos localizar esse endereço. Use sua localização atual ou confira endereço/CEP.');setBusy(false);return} payload.latitude=geo.lat;payload.longitude=geo.lng;
+      }else if(coords){payload.latitude=coords.lat;payload.longitude=coords.lng}
+      const out=await api('/api/auth/register',{method:'POST',body:JSON.stringify(payload)});setRecovery(out.recoveryCode);
     }catch(err:any){setMessage(err.message)}finally{setBusy(false)}
   }
-
-  if(recovery) return <div className="modalBackdrop"><div className="modal recoveryCard"><button className="close" onClick={onClose}>×</button><div className="successIcon">✓</div><h2>Cadastro criado</h2><p>Guarde este código em um local seguro. Ele será exibido apenas agora e poderá ser usado para redefinir sua senha.</p><div className="recoveryCode">{recovery}</div><p className="warning">Não compartilhe este código com outras pessoas.</p><button className="primary full" onClick={onClose}>Concluir</button></div></div>;
-  return <div className="modalBackdrop"><div className="modal"><button className="close" onClick={onClose}>×</button>{!role?<><span className="eyebrow">CRIAR CONTA</span><h2>Como você quer usar o ServPerto?</h2><div className="roleGrid"><button onClick={()=>setRole('client')}><span>🙋</span><b>Sou cliente</b><small>Quero encontrar profissionais próximos.</small></button><button onClick={()=>setRole('professional')}><span>🧰</span><b>Sou prestador</b><small>Quero divulgar meus serviços.</small></button></div></>:<form onSubmit={submit}><button type="button" className="back" onClick={()=>setRole(null)}>← Alterar perfil</button><span className="eyebrow">{role==='professional'?'CADASTRO DO PRESTADOR':'CADASTRO DO CLIENTE'}</span><h2>Crie sua conta</h2><div className="formGrid"><label>Nome completo<input name="name" required/></label><label>Telefone<input name="phone" required placeholder="(92) 99999-9999"/></label><label>CEP<input name="cep" required inputMode="numeric"/></label><label>Cidade<input name="city" required defaultValue="Manaus"/></label><label className="wide">Endereço completo<input name="address" required placeholder="Rua, número, bairro"/></label>{role==='professional'&&<><label>Categoria principal<input name="category" required placeholder="Ex.: Eletricista"/></label><label>Local de atendimento<select name="locationType" defaultValue="work"><option value="work">Endereço de trabalho</option><option value="home">Endereço residencial</option></select></label><label className="wide consent"><input type="checkbox" name="showExactLocation" value="1"/> Exibir meu ponto exato no mapa público. Se desmarcado, o ServPerto usa posição aproximada para proteger endereço residencial.</label></>}<label>Nome de login<input name="username" required minLength={4} autoCapitalize="none"/></label><label>Senha de acesso<input name="password" type="password" required minLength={8}/></label></div><button type="button" className="secondary full" onClick={()=>navigator.geolocation?.getCurrentPosition(p=>{setCoords({lat:p.coords.latitude,lng:p.coords.longitude});setMessage('')},()=>setMessage('Não foi possível obter sua localização.'))}>📍 Usar localização atual para este cadastro</button>{coords&&<div className="okText">✓ Localização capturada.</div>}{message&&<div className="errorText">{message}</div>}<button disabled={busy} className="primary full">{busy?'Criando conta...':'Criar conta'}</button></form>}</div></div>;
+  if(recovery)return <div className="modalBackdrop"><div className="modal recoveryCard"><button className="close" onClick={onClose}>×</button><div className="successIcon">✓</div><h2>Cadastro criado</h2><p>Guarde este código. Ele será exibido apenas agora e poderá redefinir sua senha.</p><div className="recoveryCode">{recovery}</div><p className="warning">Não compartilhe este código.</p><button className="primary full" onClick={onClose}>Concluir</button></div></div>;
+  return <div className="modalBackdrop"><div className="modal"><button className="close" onClick={onClose}>×</button>{!role?<><span className="eyebrow">CRIAR CONTA</span><h2>Como você quer usar o ServPerto?</h2><div className="roleGrid"><button onClick={()=>setRole('client')}><span>🙋</span><b>Sou cliente</b><small>Quero encontrar profissionais próximos.</small></button><button onClick={()=>setRole('professional')}><span>🧰</span><b>Sou prestador</b><small>Quero divulgar meus serviços.</small></button></div></>:<form onSubmit={submit}><button type="button" className="back" onClick={()=>setRole(null)}>← Alterar perfil</button><span className="eyebrow">{role==='professional'?'CADASTRO DO PRESTADOR':'CADASTRO DO CLIENTE'}</span><h2>Crie sua conta</h2><div className="formGrid"><label>Nome completo<input name="name" required/></label><label>Telefone / WhatsApp<input name="phone" required placeholder="(92) 99999-9999"/></label><label>CEP<input name="cep" required inputMode="numeric"/></label><label>Cidade<input name="city" required defaultValue="Manaus"/></label><label className="wide">Endereço completo<input name="address" required placeholder="Rua, número, bairro"/></label>{role==='professional'&&<><label>Categoria principal<input name="category" list="service-list" required placeholder="Ex.: Técnico em informática"/><datalist id="service-list">{serviceExamples.map(x=><option value={x} key={x}/>)}</datalist></label><label>Local de atendimento<select name="locationType" defaultValue="work"><option value="work">Endereço de trabalho</option><option value="home">Endereço residencial</option></select></label><label className="wide">Serviços oferecidos<input name="services" placeholder="Ex.: Formatação, redes Wi-Fi, instalação de programas"/></label><label className="wide">Descrição profissional<textarea name="description" rows={4} placeholder="Conte sua experiência e como você pode ajudar o cliente."/></label><label className="wide consent"><input type="checkbox" name="showExactLocation" value="1"/> Exibir meu ponto exato no mapa. Se desmarcado, o ServPerto usa uma posição aproximada.</label></>}<label>Nome de login<input name="username" required minLength={4} autoCapitalize="none"/></label><label>Senha de acesso<input name="password" type="password" required minLength={8}/></label></div><button type="button" className="secondary full" onClick={()=>navigator.geolocation?.getCurrentPosition(p=>{setCoords({lat:p.coords.latitude,lng:p.coords.longitude});setMessage('')},()=>setMessage('Não foi possível obter sua localização.'))}>📍 Usar localização atual para este cadastro</button>{coords&&<div className="okText">✓ Localização capturada.</div>}{message&&<div className="errorText">{message}</div>}<button disabled={busy} className="primary full">{busy?'Criando conta...':'Criar conta'}</button></form>}</div></div>;
 }
 
-type LoggedUser = { id:number; name:string; username:string; role:'provider'|'client' };
-type ProviderDashboard = {
-  user: LoggedUser;
-  provider?: { id:number; professional_name:string; description?:string; latitude?:number; longitude?:number; average_rating:number; total_reviews:number; verified:number; available:number; plan:string; phone?:string; address?:string; city?:string };
-  services?: Array<{id:number; title:string; description?:string; category:string; active:number}>;
-};
-
 function LoginModal({onClose,onLogin}:{onClose:()=>void,onLogin:(user:LoggedUser,token:string)=>void}){
-  const [mode,setMode]=useState<'login'|'recover'>('login'); const [msg,setMsg]=useState(''); const [busy,setBusy]=useState(false);
-  async function submit(e:FormEvent<HTMLFormElement>){
-    e.preventDefault(); setBusy(true); setMsg('');
-    const f=Object.fromEntries(new FormData(e.currentTarget).entries());
-    try{
-      const out=await api(mode==='login'?'/api/auth/login':'/api/auth/recover',{method:'POST',body:JSON.stringify(f)});
-      if(mode==='login'){ localStorage.setItem('servperto_token',out.token); onLogin(out.user,out.token); onClose(); }
-      else setMsg('Senha alterada com sucesso. Você já pode entrar.');
-    }catch(err:any){setMsg(err.message)}finally{setBusy(false)}
-  }
+  const [mode,setMode]=useState<'login'|'recover'>('login'),[msg,setMsg]=useState(''),[busy,setBusy]=useState(false);
+  async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setMsg('');const f=Object.fromEntries(new FormData(e.currentTarget).entries());try{const out=await api(mode==='login'?'/api/auth/login':'/api/auth/recover',{method:'POST',body:JSON.stringify(f)});if(mode==='login'){localStorage.setItem('servperto_token',out.token);onLogin(out.user,out.token);onClose()}else setMsg('Senha alterada com sucesso. Você já pode entrar.')}catch(err:any){setMsg(err.message)}finally{setBusy(false)}}
   return <div className="modalBackdrop"><div className="modal compact"><button className="close" onClick={onClose}>×</button><span className="eyebrow">ACESSO SERVPERTO</span><h2>{mode==='login'?'Entrar na plataforma':'Recuperar acesso'}</h2><form onSubmit={submit}><label>Nome de login<input name="username" required/></label>{mode==='recover'&&<label>Código de recuperação (6 dígitos)<input name="recoveryCode" required inputMode="numeric" pattern="[0-9]{6}" maxLength={6}/></label>}<label>{mode==='login'?'Senha':'Nova senha'}<input name={mode==='login'?'password':'newPassword'} type="password" required minLength={8}/></label>{msg&&<div className={msg.startsWith('Senha alterada')?'okText':'errorText'}>{msg}</div>}<button disabled={busy} className="primary full">{busy?'Aguarde...':mode==='login'?'Entrar':'Alterar senha'}</button><button type="button" className="linkBtn" onClick={()=>{setMode(mode==='login'?'recover':'login');setMsg('')}}>{mode==='login'?'Esqueci minha senha':'Voltar para o login'}</button></form></div></div>;
+}
+
+function ProfileModal({id,onClose,onLogin}:{id:number,onClose:()=>void,onLogin:()=>void}){
+  const [data,setData]=useState<ProfileDetail|null>(null),[error,setError]=useState('');
+  useEffect(()=>{api(`/api/professionals/${id}`).then(setData).catch(e=>setError(e.message))},[id]);
+  return <div className="modalBackdrop"><div className="modal profileModal"><button className="close" onClick={onClose}>×</button>{error?<div className="errorText">{error}</div>:!data?<div className="profileLoading">Carregando perfil...</div>:<><div className="profileHero"><div className="profileAvatar">{data.professional.name.charAt(0)}</div><div><span className="eyebrow">PERFIL PROFISSIONAL</span><h2>{data.professional.name}</h2><div className="profileMeta"><span>⭐ {data.professional.review_count?Number(data.professional.rating).toFixed(1):'Novo'} {data.professional.review_count?`— ${data.professional.review_count} avaliações`:''}</span><span>📍 {data.professional.city||'Manaus'} – AM</span><span className="available">🟢 Disponível</span></div></div></div><section className="profileSection"><h3>Sobre o profissional</h3><p>{data.professional.description||'Este profissional ainda não adicionou uma descrição detalhada.'}</p></section><section className="profileSection"><h3>Serviços oferecidos</h3><div className="serviceChips">{data.services.length?data.services.map(s=><span key={s.id}>{s.title}</span>):<span>{data.professional.category}</span>}</div></section><section className="profileSection"><h3>Área de atendimento</h3><p>{data.professional.city||'Manaus'} e regiões próximas.</p></section><section className="profileSection"><h3>Avaliações</h3>{data.reviews.length?data.reviews.map(r=><article className="reviewCard" key={r.id}><b>{'⭐'.repeat(r.rating)}</b><p>“{r.comment||'Cliente avaliou o serviço.'}”</p><small>{r.client_name} • {new Date(r.created_at).toLocaleDateString('pt-BR')}</small></article>):<p>Ainda não há avaliações publicadas para este profissional.</p>}</section><div className="profileActions"><button className="primary" onClick={onLogin}>Solicitar orçamento</button><button className="secondary" onClick={onClose}>Voltar à busca</button></div><small className="comingNote">A solicitação de orçamento será concluída na próxima etapa do ServPerto. Ao clicar, você pode entrar ou criar sua conta de cliente.</small></>}</div></div>;
 }
 
 function Dashboard({data,onLogout}:{data:ProviderDashboard,onLogout:()=>void}){
   const isProvider=data.user.role==='provider';
-  return <main className="dashboardPage">
-    <nav className="dashNav"><b>📍 ServPerto</b><div className="navActions"><span>{data.user.name}</span><button className="navLogin" onClick={onLogout}>Sair</button></div></nav>
-    <section className="dashboardWrap">
-      <aside className="dashSidebar"><div className="dashAvatar">{data.user.name.charAt(0).toUpperCase()}</div><h3>{data.user.name}</h3><small>{isProvider?'Prestador de serviço':'Cliente'}</small><button className="active">Visão geral</button>{isProvider&&<><button>Meu perfil</button><button>Meus serviços</button><button>Pedidos recebidos</button><button>Avaliações</button></>} {!isProvider&&<><button>Meus pedidos</button><button>Favoritos</button></>}</aside>
-      <div className="dashContent"><div className="dashHeader"><div><span className="eyebrow">PAINEL SERVPERTO</span><h1>Olá, {data.user.name.split(' ')[0]} 👋</h1><p>{isProvider?'Gerencie seu perfil profissional e acompanhe sua presença na plataforma.':'Encontre profissionais e acompanhe suas solicitações.'}</p></div><a className="dashHome" href="/">Ver página inicial</a></div>
-      {isProvider?<><div className="statGrid"><article><span>⭐</span><strong>{Number(data.provider?.average_rating||0).toFixed(1)}</strong><small>Avaliação média</small></article><article><span>💬</span><strong>{data.provider?.total_reviews||0}</strong><small>Avaliações recebidas</small></article><article><span>🧰</span><strong>{data.services?.length||0}</strong><small>Serviços cadastrados</small></article><article><span>📦</span><strong>{(data.provider?.plan||'free').toUpperCase()}</strong><small>Plano atual</small></article></div><div className="dashCards"><article><h3>Seu perfil profissional</h3><p><b>Nome:</b> {data.provider?.professional_name||data.user.name}</p><p><b>Cidade:</b> {data.provider?.city||'Manaus'}</p><p><b>Endereço:</b> {data.provider?.address||'Não informado'}</p><p><b>Status:</b> {data.provider?.available?'Disponível':'Indisponível'}</p></article><article><h3>Serviços cadastrados</h3>{data.services?.length?data.services.map(s=><div className="serviceRow" key={s.id}><b>{s.title}</b><span>{s.category}</span></div>):<p>Nenhum serviço cadastrado ainda.</p>}</article></div></>:<div className="dashCards"><article><h3>Bem-vindo ao ServPerto</h3><p>Use a página inicial para pesquisar profissionais próximos e solicitar serviços.</p></article></div>}
-      </div>
-    </section>
-  </main>;
+  return <main className="dashboardPage"><nav className="dashNav"><b>📍 ServPerto</b><div className="navActions"><span>{data.user.name}</span><button className="navLogin" onClick={onLogout}>Sair</button></div></nav><section className="dashboardWrap"><aside className="dashSidebar"><div className="dashAvatar">{data.user.name.charAt(0).toUpperCase()}</div><h3>{data.user.name}</h3><small>{isProvider?'Prestador de serviço':'Cliente'}</small><button className="active">Visão geral</button>{isProvider&&<><button>Meu perfil</button><button>Meus serviços</button><button>Pedidos recebidos</button><button>Avaliações</button></>}{!isProvider&&<><button>Meus pedidos</button><button>Favoritos</button></>}</aside><div className="dashContent"><div className="dashHeader"><div><span className="eyebrow">PAINEL SERVPERTO</span><h1>Olá, {data.user.name.split(' ')[0]} 👋</h1><p>{isProvider?'Gerencie seu perfil profissional e acompanhe sua presença na plataforma.':'Encontre profissionais e acompanhe suas solicitações.'}</p></div><a className="dashHome" href="/">Ver página inicial</a></div>{isProvider?<><div className="statGrid"><article><span>⭐</span><strong>{Number(data.provider?.average_rating||0).toFixed(1)}</strong><small>Avaliação média</small></article><article><span>💬</span><strong>{data.provider?.total_reviews||0}</strong><small>Avaliações recebidas</small></article><article><span>🧰</span><strong>{data.services?.length||0}</strong><small>Serviços cadastrados</small></article><article><span>📦</span><strong>{(data.provider?.plan||'free').toUpperCase()}</strong><small>Plano atual</small></article></div><div className="dashCards"><article><h3>Seu perfil profissional</h3><p><b>Nome:</b> {data.provider?.professional_name||data.user.name}</p><p><b>Cidade:</b> {data.provider?.city||'Manaus'}</p><p><b>Endereço:</b> {data.provider?.address||'Protegido / não público'}</p><p><b>Status:</b> {data.provider?.available?'Disponível':'Indisponível'}</p></article><article><h3>Serviços cadastrados</h3>{data.services?.length?data.services.map(s=><div className="serviceRow" key={s.id}><b>{s.title}</b><span>{s.category}</span></div>):<p>Nenhum serviço cadastrado ainda.</p>}</article></div></>:<div className="dashCards"><article><h3>Bem-vindo ao ServPerto</h3><p>Use a página inicial para pesquisar profissionais próximos.</p></article></div>}</div></section></main>;
 }
 
 function App(){
-  const [register,setRegister]=useState(false); const [login,setLogin]=useState(false); const [query,setQuery]=useState('');
-  const [session,setSession]=useState<ProviderDashboard|null>(null); const [authLoading,setAuthLoading]=useState(true);
-  const [professionals,setProfessionals]=useState<Professional[]>([]); const [userPos,setUserPos]=useState<{lat:number,lng:number}|null>(null); const [geoMsg,setGeoMsg]=useState('');
-  const [geoHelp,setGeoHelp]=useState(false); const [geoLoading,setGeoLoading]=useState(false);
+  const [register,setRegister]=useState(false),[login,setLogin]=useState(false),[query,setQuery]=useState(''),[queryError,setQueryError]=useState(''),[locationText,setLocationText]=useState(''),[locationBusy,setLocationBusy]=useState(false);
+  const [session,setSession]=useState<ProviderDashboard|null>(null),[authLoading,setAuthLoading]=useState(true),[professionals,setProfessionals]=useState<Professional[]>([]),[userPos,setUserPos]=useState<{lat:number,lng:number}|null>(null),[geoMsg,setGeoMsg]=useState(''),[geoHelp,setGeoHelp]=useState(false),[geoLoading,setGeoLoading]=useState(false),[profileId,setProfileId]=useState<number|null>(null);
   useEffect(()=>{api('/api/professionals').then(setProfessionals).catch(()=>setProfessionals([]))},[]);
-  useEffect(()=>{const token=localStorage.getItem('servperto_token'); if(!token){setAuthLoading(false);return} api('/api/me',{headers:{authorization:`Bearer ${token}`}}).then(setSession).catch(()=>localStorage.removeItem('servperto_token')).finally(()=>setAuthLoading(false))},[]);
-
-  // Hooks precisam ser executados na mesma ordem em todas as renderizações.
-  // Antes, este useMemo ficava depois dos returns condicionais de authLoading/session,
-  // o que causava "Rendered more hooks than during the previous render" e tela em branco.
-  const shown=useMemo(()=>professionals.filter(p=>!query||`${p.name} ${p.category}`.toLowerCase().includes(query.toLowerCase())).map(p=>({...p,distanceKm:userPos?distanceKm(userPos.lat,userPos.lng,p.latitude,p.longitude):undefined})).sort((a,b)=>userPos?(a.distanceKm!-b.distanceKm!):(b.rating-a.rating)),[professionals,query,userPos]);
-
+  useEffect(()=>{const token=localStorage.getItem('servperto_token');if(!token){setAuthLoading(false);return}api('/api/me',{headers:{authorization:`Bearer ${token}`}}).then(setSession).catch(()=>localStorage.removeItem('servperto_token')).finally(()=>setAuthLoading(false))},[]);
+  const shown=useMemo(()=>professionals.filter(p=>!query||`${p.name} ${p.category} ${p.description||''}`.toLowerCase().includes(query.toLowerCase())).map(p=>({...p,distanceKm:userPos?distanceKm(userPos.lat,userPos.lng,p.latitude,p.longitude):undefined})).sort((a,b)=>userPos?(a.distanceKm!-b.distanceKm!):(b.rating-a.rating||b.review_count-a.review_count)),[professionals,query,userPos]);
+  const categories=useMemo(()=>Array.from(new Set([...serviceExamples,...professionals.map(p=>p.category)])).sort(),[professionals]);
   async function handleLogin(_user:LoggedUser,token:string){try{const data=await api('/api/me',{headers:{authorization:`Bearer ${token}`}});setSession(data)}catch{localStorage.removeItem('servperto_token')}}
-  async function logout(){const token=localStorage.getItem('servperto_token'); if(token) await api('/api/auth/logout',{method:'POST',headers:{authorization:`Bearer ${token}`}}).catch(()=>{}); localStorage.removeItem('servperto_token'); setSession(null)}
-  if(authLoading) return <main className="loadingPage"><div>📍</div><b>Carregando ServPerto...</b></main>;
-  if(session) return <Dashboard data={session} onLogout={logout}/>;
-  async function enableLocation(){
-    setGeoMsg(''); setGeoHelp(false);
-    if(!window.isSecureContext){setGeoMsg('A localização só funciona em conexão segura (HTTPS).');setGeoHelp(true);return}
-    if(!navigator.geolocation){setGeoMsg('Este dispositivo ou navegador não oferece geolocalização.');setGeoHelp(true);return}
-    try{if(navigator.permissions?.query){const permission=await navigator.permissions.query({name:'geolocation' as PermissionName});if(permission.state==='denied'){setGeoMsg('O acesso à localização está bloqueado no navegador.');setGeoHelp(true);return}}}catch{}
-    setGeoLoading(true);
-    navigator.geolocation.getCurrentPosition(p=>{setUserPos({lat:p.coords.latitude,lng:p.coords.longitude});setGeoMsg('✓ Localização encontrada. Os profissionais serão ordenados pela distância até você.');setGeoHelp(false);setGeoLoading(false)},err=>{setGeoLoading(false);if(err.code===1){setGeoMsg('Você não autorizou o acesso à localização.');setGeoHelp(true)}else if(err.code===2)setGeoMsg('Não foi possível determinar sua localização neste momento.');else if(err.code===3)setGeoMsg('A busca da sua localização demorou demais. Tente novamente.');else setGeoMsg('Não foi possível acessar sua localização.')},{enableHighAccuracy:true,timeout:12000,maximumAge:60000});
-  }
-  return <main><nav><b>📍 ServPerto</b><div className="navActions"><span>Manaus • AM</span><button className="navLogin" onClick={()=>setLogin(true)}>Entrar</button><button className="navRegister" onClick={()=>setRegister(true)}>Cadastre-se</button></div></nav><section className="hero"><div className="heroCopy"><small>PROFISSIONAIS PERTO DE VOCÊ</small><h1>O profissional certo,<br/><em>perto de você.</em></h1><p>Encontre prestadores de serviços próximos, confira avaliações e solicite orçamento em poucos minutos.</p><div className="search"><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Qual serviço você precisa?"/><button onClick={()=>document.querySelector('.results')?.scrollIntoView({behavior:'smooth'})}>Buscar profissionais</button></div><div className="locationPrompt"><button onClick={enableLocation} disabled={geoLoading}>{geoLoading?'⌛ Localizando...':'📍 Usar minha localização atual'}</button><span>{userPos?'Localização habilitada: resultados ordenados por distância.':'Opcional: permita o acesso para ver primeiro os profissionais mais próximos.'}</span></div>{geoMsg&&<div className={userPos?'okText geoNotice':'errorText geoNotice'}>{geoMsg}{geoHelp&&<button className="geoHelpBtn" onClick={()=>setGeoHelp(v=>!v)}>Como habilitar?</button>}</div>}{geoHelp&&<div className="geoHelp"><b>Como liberar a localização no Chrome</b><span>1. Clique no ícone ao lado do endereço do site.</span><span>2. Abra <strong>Configurações do site</strong>.</span><span>3. Em <strong>Localização</strong>, selecione <strong>Permitir</strong>.</span><span>4. Atualize a página e toque novamente em <strong>Usar minha localização</strong>.</span><small>Você pode pesquisar sem compartilhar sua localização. Ela é usada apenas para ordenar profissionais por proximidade.</small></div>}<div className="providerCta"><div><b>Você presta serviços?</b><span>Crie seu perfil e seja encontrado por clientes próximos.</span></div><button onClick={()=>setRegister(true)}>Cadastrar gratuitamente</button></div></div><div className="card mapCard"><MapPanel professionals={shown} userPosition={userPos} onEnableLocation={enableLocation}/><div className="mapCaption"><h3>Profissionais próximos</h3><p>Mapa próprio do ServPerto com dados do OpenStreetMap.</p></div></div></section>{shown.length>0&&<section className="results"><div className="sectionTitle"><div><small>RESULTADOS NO MAPA</small><h2>{shown.length} profissional{shown.length!==1?'is':''} encontrado{shown.length!==1?'s':''}</h2></div>{userPos&&<span>📍 Ordenados por proximidade</span>}</div><div className="resultGrid">{shown.slice(0,6).map(p=><article key={p.id}><div className="avatar">{p.name.charAt(0)}</div><div><b>{p.name}</b><span>{p.category}</span><small>{p.review_count?`${p.rating.toFixed(1)} ⭐ • ${p.review_count} avaliações`:'Novo no ServPerto'}{p.distanceKm!=null?` • ${p.distanceKm.toFixed(1)} km`:''}</small></div></article>)}</div></section>}<section className="features"><article>⭐<h3>Avaliações reais</h3><p>Reputação construída por clientes.</p></article><article>📌<h3>Busca por proximidade</h3><p>Encontre quem atende perto de você.</p></article><article>💬<h3>Orçamento rápido</h3><p>Descreva o serviço e receba propostas.</p></article></section>{register&&<RegisterModal onClose={()=>setRegister(false)}/>} {login&&<LoginModal onClose={()=>setLogin(false)} onLogin={handleLogin}/>}</main>;
+  async function logout(){const token=localStorage.getItem('servperto_token');if(token)await api('/api/auth/logout',{method:'POST',headers:{authorization:`Bearer ${token}`}}).catch(()=>{});localStorage.removeItem('servperto_token');setSession(null)}
+  async function enableLocation(){setGeoMsg('');setGeoHelp(false);if(!window.isSecureContext){setGeoMsg('A localização só funciona em conexão segura (HTTPS).');setGeoHelp(true);return}if(!navigator.geolocation){setGeoMsg('Este dispositivo ou navegador não oferece geolocalização.');setGeoHelp(true);return}try{if(navigator.permissions?.query){const permission=await navigator.permissions.query({name:'geolocation' as PermissionName});if(permission.state==='denied'){setGeoMsg('Não conseguimos acessar sua localização. Informe seu bairro, CEP ou endereço para continuar.');setGeoHelp(true);return}}}catch{}setGeoLoading(true);navigator.geolocation.getCurrentPosition(p=>{setUserPos({lat:p.coords.latitude,lng:p.coords.longitude});setGeoMsg('✓ Localização encontrada. Resultados ordenados pela distância.');setGeoHelp(false);setGeoLoading(false)},()=>{setGeoLoading(false);setGeoMsg('Não conseguimos acessar sua localização. Informe seu bairro, CEP ou endereço para continuar.');setGeoHelp(true)},{enableHighAccuracy:true,timeout:12000,maximumAge:60000})}
+  async function useTypedLocation(){if(!locationText.trim()){setGeoMsg('Digite seu bairro, CEP ou endereço para continuar.');return}setLocationBusy(true);setGeoMsg('');try{const out=await api(`/api/geocode?q=${encodeURIComponent(`${locationText}, Manaus, AM, Brasil`)}`);setUserPos({lat:Number(out.latitude),lng:Number(out.longitude)});setGeoMsg(`✓ Local de busca definido: ${locationText}.`)}catch(e:any){setGeoMsg(e.message||'Não conseguimos localizar esse endereço.')}finally{setLocationBusy(false)}}
+  function doSearch(){if(!query.trim()){setQueryError('Digite o serviço que você está procurando.');return}setQueryError('');document.querySelector('.results')?.scrollIntoView({behavior:'smooth'})}
+  if(authLoading)return <main className="loadingPage"><div>📍</div><b>Carregando ServPerto...</b></main>;
+  if(session)return <Dashboard data={session} onLogout={logout}/>;
+  return <main><nav><b>📍 ServPerto</b><div className="navActions"><span>Manaus • AM</span><button className="navLogin" onClick={()=>setLogin(true)}>Entrar</button><button className="navRegister" onClick={()=>setRegister(true)}>Cadastre-se</button></div></nav>
+  <section className="hero"><div className="heroCopy"><small>MARKETPLACE LOCAL DE SERVIÇOS</small><h1>Encontre profissionais<br/><em>perto de você</em></h1><p>Encontre profissionais qualificados na sua região de forma rápida, simples e segura.</p><div className="search"><input value={query} onChange={e=>{setQuery(e.target.value);setQueryError('')}} list="home-service-list" placeholder="Qual serviço você precisa?"/><datalist id="home-service-list">{categories.map(x=><option value={x} key={x}/>)}</datalist><button onClick={doSearch}>🔍 Buscar profissionais</button></div>{queryError&&<div className="errorText searchError">{queryError}</div>}<div className="quickServices">{serviceExamples.slice(0,6).map(s=><button key={s} onClick={()=>setQuery(s)}>{s}</button>)}</div>
+  <div className="whereBox"><h3>📍 Onde você precisa do serviço?</h3><div className="whereActions"><button className="locationMain" onClick={enableLocation} disabled={geoLoading}>{geoLoading?'⌛ Localizando...':'Usar minha localização'}</button><span>ou</span><div className="manualLocation"><input value={locationText} onChange={e=>setLocationText(e.target.value)} placeholder="Digite seu bairro, CEP ou endereço"/><button onClick={useTypedLocation} disabled={locationBusy}>{locationBusy?'...':'Usar local'}</button></div></div>{geoMsg&&<div className={userPos?'okText geoNotice':'errorText geoNotice'}>{geoMsg}</div>}{geoHelp&&<small className="locationHint">Você pode continuar sem GPS usando o campo de bairro, CEP ou endereço.</small>}</div>
+  <div className="providerCta"><div><b>Você presta serviços?</b><span>Crie seu perfil e seja encontrado por clientes próximos.</span></div><button onClick={()=>setRegister(true)}>Cadastrar gratuitamente</button></div></div><div className="card mapCard"><MapPanel professionals={shown} userPosition={userPos} onEnableLocation={enableLocation} onOpenProfile={setProfileId}/><div className="mapCaption"><h3>Profissionais próximos</h3><p>Localização + reputação para escolher com confiança.</p></div></div></section>
+  <section className="results"><div className="sectionTitle"><div><small>RESULTADOS</small><h2>Profissionais encontrados perto de você</h2></div>{userPos&&<span>📍 Ordenados por proximidade</span>}</div>{query&&shown.length===0?<div className="emptyResults">Nenhum profissional encontrado para “{query}”. Tente outra categoria.</div>:<div className="professionalGrid">{shown.slice(0,12).map(p=><article className="professionalCard" key={p.id}><div className="proTop"><div className="proAvatar">{p.name.charAt(0)}</div><div><h3>{p.name}</h3><div className="stars">⭐ {p.review_count?`${Number(p.rating).toFixed(1)} (${p.review_count} avaliações)`:'Novo no ServPerto'}</div></div></div><div className="proCategory">🧰 {p.category}</div>{p.distanceKm!=null&&<div className="proDistance">📍 {p.distanceKm.toFixed(1)} km de distância</div>}<div className="proStatus">🟢 Disponível</div><div className="proActions"><button onClick={()=>setProfileId(p.id)}>Ver perfil</button><button className="outline" onClick={()=>setLogin(true)}>Solicitar orçamento</button></div></article>)}</div>}</section>
+  <section className="trust"><div className="sectionTitle"><div><small>SEGURANÇA E CONFIANÇA</small><h2>Por que usar o ServPerto?</h2></div></div><div className="trustGrid">{['Profissionais próximos de você','Avaliações de clientes','Solicitação de orçamento','Perfis profissionais','Localização por região','Plataforma simples e segura'].map(x=><article key={x}><span>✓</span><b>{x}</b></article>)}</div></section>
+  <footer><div><b>📍 ServPerto</b><p>Encontre profissionais perto de você.</p></div><div className="footerLinks"><a href="#">Sobre nós</a><a href="#">Como funciona</a><button onClick={()=>setRegister(true)}>Seja um profissional</button><a href="#">Termos de Uso</a><a href="#">Política de Privacidade</a><a href="#">Fale conosco</a></div><small>© 2026 ServPerto — Todos os direitos reservados.</small></footer>
+  {register&&<RegisterModal onClose={()=>setRegister(false)}/>} {login&&<LoginModal onClose={()=>setLogin(false)} onLogin={handleLogin}/>} {profileId!=null&&<ProfileModal id={profileId} onClose={()=>setProfileId(null)} onLogin={()=>{setProfileId(null);setLogin(true)}}/>}</main>;
 }
 createRoot(document.getElementById('root')!).render(<App/>);

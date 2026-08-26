@@ -1,37 +1,21 @@
-# ServPerto v0.6
+# ServPerto v0.7
 
-Versão Cloudflare Workers + D1 com mapa Leaflet/OpenStreetMap, sem dependência do Google Maps.
+Marketplace local de serviços para Manaus/AM, publicado em Cloudflare Workers com D1.
+
+## Principais recursos desta versão
+- Busca por serviço com validação e sugestões.
+- Localização por GPS ou bairro/CEP/endereço.
+- Mapa Leaflet + OpenStreetMap com profissionais cadastrados.
+- Cards de resultado com distância, reputação e disponibilidade.
+- Perfil público individual do profissional com serviços e avaliações.
+- Cadastro de cliente/prestador, login, recuperação e painel autenticado preservados.
+- Seções de confiança e rodapé institucional.
 
 ## Deploy
-
 ```bash
 npm install
 npm run build
 npx wrangler deploy
 ```
 
-## Cloudflare
-
-O Worker deve manter os bindings:
-
-- `ASSETS` para os arquivos estáticos
-- `DB` para o D1 `servperto-db`
-
-Não é necessária variável ou secret do Google Maps.
-
-## Mapa
-
-- Frontend: Leaflet
-- Tiles: OpenStreetMap
-- Geocodificação de cadastro: endpoint `/api/geocode`, usando Nominatim para baixo volume
-- Geolocalização do cliente: API nativa do navegador
-
-Para produção em escala, troque os tiles/geocoder públicos por um provedor compatível sem alterar a arquitetura do mapa.
-
-
-## v0.6.3
-- Login abre painel autenticado automaticamente.
-- Sessão persistida por token.
-- Endpoint /api/me para carregar perfil do prestador.
-- Painel do prestador com resumo, perfil, serviços, avaliações e plano.
-- Logout revoga a sessão no D1.
+O binding D1 deve permanecer como `DB` e os assets como `ASSETS`.
