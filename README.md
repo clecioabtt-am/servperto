@@ -19,3 +19,6 @@ npx wrangler deploy
 ```
 
 O binding D1 deve permanecer como `DB` e os assets como `ASSETS`.
+
+## v0.7.1 - fluxo do cliente
+Após publicar esta versão, aplique `migrations/0002_client_requests.sql` no D1 `servperto-db` uma única vez. A atualização adiciona `target_provider_id` às solicitações, permitindo que o orçamento fique associado ao profissional selecionado.

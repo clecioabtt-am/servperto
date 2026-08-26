@@ -260,6 +260,68 @@ export default {
       return json({ user: base, provider, services: services.results || [] });
     }
 
+
+    if (url.pathname === '/api/service-requests' && request.method === 'POST') {
+      const user: any = await sessionUser(request, db);
+      if (!user) return json({ error: 'Faça login como cliente para solicitar um orçamento.' }, { status: 401 });
+      if (user.role !== 'client') return json({ error: 'Somente clientes podem solicitar orçamento.' }, { status: 403 });
+      const b = await readBody(request);
+      const providerId = Number(b.providerId || 0);
+      const title = String(b.title || '').trim();
+      const description = String(b.description || '').trim();
+      const address = String(b.address || '').trim() || null;
+      if (!providerId || !title || description.length < 5) return json({ error: 'Preencha o serviço e descreva o que você precisa.' }, { status: 400 });
+      const provider: any = await db.prepare(`
+        SELECT pp.id, sc.id AS category_id
+        FROM provider_profiles pp
+        LEFT JOIN provider_services ps ON ps.provider_id = pp.id AND ps.active = 1
+        LEFT JOIN service_categories sc ON sc.id = ps.category_id
+        JOIN users u ON u.id = pp.user_id
+        WHERE pp.id = ? AND u.active = 1 AND pp.available = 1
+        LIMIT 1
+      `).bind(providerId).first();
+      if (!provider) return json({ error: 'Profissional indisponível ou não encontrado.' }, { status: 404 });
+      const result: any = await db.prepare(`
+        INSERT INTO service_requests (client_id, category_id, target_provider_id, title, description, address, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `).bind(user.id, provider.category_id || null, providerId, title, description, address).run();
+      return json({ ok: true, requestId: result.meta?.last_row_id || null }, { status: 201 });
+    }
+
+    if (url.pathname === '/api/service-requests' && request.method === 'GET') {
+      const user: any = await sessionUser(request, db);
+      if (!user) return json({ error: 'Sessão inválida ou expirada.' }, { status: 401 });
+      if (user.role === 'client') {
+        const out: any = await db.prepare(`
+          SELECT sr.id, sr.title, sr.description, sr.status, sr.created_at,
+                 sr.target_provider_id AS provider_id,
+                 COALESCE(pp.professional_name, pu.full_name) AS provider_name,
+                 sc.name AS category
+          FROM service_requests sr
+          LEFT JOIN provider_profiles pp ON pp.id = sr.target_provider_id
+          LEFT JOIN users pu ON pu.id = pp.user_id
+          LEFT JOIN service_categories sc ON sc.id = sr.category_id
+          WHERE sr.client_id = ?
+          ORDER BY sr.created_at DESC
+          LIMIT 100
+        `).bind(user.id).all();
+        return json({ requests: out.results || [] });
+      }
+      const provider: any = await db.prepare('SELECT id FROM provider_profiles WHERE user_id = ?').bind(user.id).first();
+      if (!provider) return json({ requests: [] });
+      const out: any = await db.prepare(`
+        SELECT sr.id, sr.title, sr.description, sr.address, sr.status, sr.created_at,
+               cu.full_name AS client_name, cu.phone AS client_phone, sc.name AS category
+        FROM service_requests sr
+        JOIN users cu ON cu.id = sr.client_id
+        LEFT JOIN service_categories sc ON sc.id = sr.category_id
+        WHERE sr.target_provider_id = ?
+        ORDER BY sr.created_at DESC
+        LIMIT 100
+      `).bind(provider.id).all();
+      return json({ requests: out.results || [] });
+    }
+
     if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
       const auth = request.headers.get('authorization') || '';
       const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
