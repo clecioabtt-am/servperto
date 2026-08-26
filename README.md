@@ -1,28 +1,30 @@
-# ServPerto v0.8.0
+# ServPerto v0.9.0
 
-Marketplace local de serviços para Cloudflare Workers + D1, com frontend React/Vite e mapas Leaflet + OpenStreetMap.
+Marketplace local de serviços em Cloudflare Workers + D1, com React/Vite, Leaflet e OpenStreetMap.
 
-## Fluxos implementados
+## Principais recursos
 
-- Cadastro de cliente e prestador com recuperação por código de 6 dígitos.
-- Login, sessão, logout e troca de senha.
-- Busca de profissionais, geolocalização, mapa e perfis públicos.
-- Favoritos do cliente.
-- Solicitação de orçamento vinculada a um profissional.
-- Painel do prestador com pedidos recebidos.
-- Envio/edição de orçamento pelo prestador.
-- Aceite/recusa de orçamento pelo cliente.
-- Início e conclusão do serviço pelo prestador.
-- Avaliação liberada apenas para serviço concluído e orçamento aceito.
-- Reputação recalculada automaticamente no perfil profissional.
-- Gestão de serviços e disponibilidade pelo prestador.
+- cadastro e login de clientes e prestadores;
+- recuperação de senha por código de 6 dígitos;
+- busca e mapa público de profissionais;
+- mapa dentro do painel do cliente com filtro por categoria;
+- solicitação, orçamento, aceite, início e conclusão do serviço;
+- chat privado liberado somente após o aceite do orçamento;
+- mensagens de texto e compartilhamento de localização pelo cliente;
+- encerramento do chat pelo cliente;
+- uma avaliação por serviço concluído, de 1 a 5 estrelas;
+- favoritos;
+- foto de perfil opcional para cliente e prestador;
+- painel específico para cliente e prestador.
 
-## Deploy
+## Banco D1
 
-1. Execute as migrações do diretório `migrations/` no D1 na ordem 0001, 0002 e 0003, usando apenas as que ainda não foram aplicadas.
-2. Garanta os bindings `DB -> servperto-db` e `ASSETS`.
-3. `npm install`
-4. `npm run build`
-5. `npx wrangler deploy`
+Aplique as migrations na ordem. Para atualizar uma instalação v0.8 para v0.9, execute `migrations/0004_chat_profile_map.sql` **uma única vez** no D1 Studio antes do deploy da v0.9.
 
-Teste `/api/schema-health` após o deploy.
+> A migration 0004 pressupõe que `0002_client_requests.sql` já foi aplicada e que `service_requests.target_provider_id` existe.
+
+## Cloudflare
+
+Mantenha o binding D1 `DB` conectado ao banco `servperto-db` e o binding `ASSETS` configurado pelo `wrangler.jsonc`.
+
+Após o deploy, teste `/api/schema-health`. O retorno deve conter `"ok": true`.

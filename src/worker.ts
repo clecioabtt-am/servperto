@@ -56,7 +56,7 @@ async function sessionUser(request: Request, db: D1Database) {
   if (!token) return null;
   const tokenHash = await sha256Hex(token);
   const row: any = await db.prepare(`
-    SELECT u.id, u.full_name, u.username, u.role, u.phone, u.cep, u.address, u.city, u.state, s.id AS session_id, s.expires_at
+    SELECT u.id, u.full_name, u.username, u.role, u.phone, u.cep, u.address, u.city, u.state, u.profile_image, s.id AS session_id, s.expires_at
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ? AND u.active = 1
   `).bind(tokenHash).first();
@@ -78,25 +78,27 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     try {
-      if (url.pathname === '/api/health') return json({ ok: true, app: 'ServPerto', version: '0.8.0', runtime: 'Cloudflare Workers', database: Boolean(env.DB) });
+      if (url.pathname === '/api/health') return json({ ok: true, app: 'ServPerto', version: '0.9.0', runtime: 'Cloudflare Workers', database: Boolean(env.DB) });
       if (url.pathname.startsWith('/api/') && !env.DB) return json({ error: 'Banco D1 não vinculado. Adicione o binding DB ao Worker servperto.' }, { status: 503 });
       const db = env.DB;
 
       if (url.pathname === '/api/db-health') {
         const row: any = await db.prepare("SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table'").first();
         const users: any = await db.prepare('SELECT COUNT(*) AS total FROM users').first();
-        return json({ ok: true, database: true, tables: Number(row?.total || 0), users: Number(users?.total || 0), version: '0.8.0' });
+        return json({ ok: true, database: true, tables: Number(row?.total || 0), users: Number(users?.total || 0), version: '0.9.0' });
       }
 
       if (url.pathname === '/api/schema-health') {
         const expected: Record<string, string[]> = {
-          users: ['id','role','full_name','phone','cep','address','city','state','username','password_hash','recovery_code_hash','active'],
+          users: ['id','role','full_name','phone','cep','address','city','state','username','password_hash','recovery_code_hash','active','profile_image'],
           provider_profiles: ['id','user_id','professional_name','description','latitude','longitude','available','plan'],
           provider_services: ['id','provider_id','category_id','title','active'],
           service_requests: ['id','client_id','target_provider_id','title','description','status'],
           quotes: ['id','request_id','provider_id','price','message','status'],
           reviews: ['id','request_id','client_id','provider_id','rating'],
-          favorites: ['id','client_id','provider_id']
+          favorites: ['id','client_id','provider_id'],
+          service_chats: ['id','request_id','status','closed_by_user_id','created_at','updated_at'],
+          chat_messages: ['id','chat_id','sender_user_id','message_type','message','latitude','longitude','created_at']
         };
         const report: Record<string, any> = {}; let healthy = true;
         for (const [table, required] of Object.entries(expected)) {
@@ -106,7 +108,7 @@ export default {
           if (!columns.length || missing.length) healthy = false;
           report[table] = { exists: columns.length > 0, missing };
         }
-        return json({ ok: healthy, database: true, version: '0.8.0', schema: report }, { status: healthy ? 200 : 500 });
+        return json({ ok: healthy, database: true, version: '0.9.0', schema: report }, { status: healthy ? 200 : 500 });
       }
 
       if (url.pathname === '/api/auth/register' && request.method === 'POST') {
@@ -172,7 +174,7 @@ export default {
 
       if (url.pathname === '/api/me' && request.method === 'GET') {
         const user:any=await sessionUser(request,db); if(!user) return json({error:'Sessão inválida ou expirada.'},{status:401});
-        const base={id:user.id,name:user.full_name,username:user.username,role:user.role,phone:user.phone,cep:user.cep,address:user.address,city:user.city,state:user.state};
+        const base={id:user.id,name:user.full_name,username:user.username,role:user.role,phone:user.phone,cep:user.cep,address:user.address,city:user.city,state:user.state,image:user.profile_image||null};
         if(user.role!=='provider') return json({user:base});
         const provider:any=await providerForUser(db,user.id); const services:any=provider?await db.prepare(`SELECT ps.id,ps.title,ps.description,ps.price_from,ps.active,sc.name AS category FROM provider_services ps JOIN service_categories sc ON sc.id=ps.category_id WHERE ps.provider_id=? ORDER BY ps.created_at DESC`).bind(provider.id).all():{results:[]};
         return json({user:base,provider,services:services.results||[]});
@@ -185,13 +187,13 @@ export default {
       if (url.pathname === '/api/geocode' && request.method === 'GET') {
         const q=String(url.searchParams.get('q')||'').trim(); if(q.length<3||q.length>220) return json({error:'Endereço inválido.'},{status:400});
         const endpoint=new URL('https://nominatim.openstreetmap.org/search'); endpoint.searchParams.set('q',q); endpoint.searchParams.set('format','jsonv2'); endpoint.searchParams.set('limit','1'); endpoint.searchParams.set('countrycodes','br'); endpoint.searchParams.set('addressdetails','1');
-        const res=await fetch(endpoint.toString(),{headers:{'User-Agent':'ServPerto/0.8 (Cloudflare Worker)','Accept-Language':'pt-BR,pt;q=0.9'}}); if(!res.ok)return json({error:'Serviço de localização temporariamente indisponível.'},{status:502});
+        const res=await fetch(endpoint.toString(),{headers:{'User-Agent':'ServPerto/0.9 (Cloudflare Worker)','Accept-Language':'pt-BR,pt;q=0.9'}}); if(!res.ok)return json({error:'Serviço de localização temporariamente indisponível.'},{status:502});
         const rows:any[]=await res.json(); const hit=rows?.[0]; if(!hit)return json({error:'Endereço não encontrado.'},{status:404}); return json({ok:true,latitude:Number(hit.lat),longitude:Number(hit.lon),displayName:hit.display_name||null,source:'OpenStreetMap/Nominatim'});
       }
 
       const proMatch=url.pathname.match(/^\/api\/professionals\/(\d+)$/);
       if(proMatch&&request.method==='GET'){
-        const providerId=Number(proMatch[1]); const professional:any=await db.prepare(`SELECT pp.id,COALESCE(pp.professional_name,u.full_name) AS name,COALESCE(sc.name,ps.title,'Serviços') AS category,COALESCE(pp.description,ps.description,'') AS description,u.city,CASE WHEN pp.exact_location_public=1 THEN u.address ELSE NULL END AS address,pp.average_rating AS rating,pp.total_reviews AS review_count,pp.latitude,pp.longitude,pp.available,pp.verified FROM provider_profiles pp JOIN users u ON u.id=pp.user_id LEFT JOIN provider_services ps ON ps.provider_id=pp.id AND ps.active=1 LEFT JOIN service_categories sc ON sc.id=ps.category_id AND sc.active=1 WHERE pp.id=? AND u.active=1 GROUP BY pp.id`).bind(providerId).first();
+        const providerId=Number(proMatch[1]); const professional:any=await db.prepare(`SELECT pp.id,COALESCE(pp.professional_name,u.full_name) AS name,COALESCE(sc.name,ps.title,'Serviços') AS category,COALESCE(pp.description,ps.description,'') AS description,u.city,CASE WHEN pp.exact_location_public=1 THEN u.address ELSE NULL END AS address,pp.average_rating AS rating,pp.total_reviews AS review_count,pp.latitude,pp.longitude,pp.available,pp.verified,u.profile_image AS image FROM provider_profiles pp JOIN users u ON u.id=pp.user_id LEFT JOIN provider_services ps ON ps.provider_id=pp.id AND ps.active=1 LEFT JOIN service_categories sc ON sc.id=ps.category_id AND sc.active=1 WHERE pp.id=? AND u.active=1 GROUP BY pp.id`).bind(providerId).first();
         if(!professional)return json({error:'Profissional não encontrado.'},{status:404});
         const services:any=await db.prepare('SELECT ps.id,ps.title,ps.description,ps.price_from,sc.name AS category FROM provider_services ps JOIN service_categories sc ON sc.id=ps.category_id WHERE ps.provider_id=? AND ps.active=1 ORDER BY ps.created_at').bind(providerId).all();
         const reviews:any=await db.prepare('SELECT r.id,r.rating,r.comment,r.created_at,u.full_name AS client_name FROM reviews r JOIN users u ON u.id=r.client_id WHERE r.provider_id=? ORDER BY r.created_at DESC LIMIT 30').bind(providerId).all();
@@ -199,7 +201,7 @@ export default {
       }
 
       if(url.pathname==='/api/professionals'&&request.method==='GET'){
-        const out:any=await db.prepare(`SELECT pp.id,COALESCE(pp.professional_name,u.full_name) AS name,COALESCE(sc.name,ps.title,'Serviços') AS category,COALESCE(pp.description,ps.description,'') AS description,u.city,CASE WHEN pp.exact_location_public=1 THEN u.address ELSE NULL END AS address,pp.average_rating AS rating,pp.total_reviews AS review_count,pp.latitude,pp.longitude,pp.available,pp.verified FROM provider_profiles pp JOIN users u ON u.id=pp.user_id LEFT JOIN provider_services ps ON ps.provider_id=pp.id AND ps.active=1 LEFT JOIN service_categories sc ON sc.id=ps.category_id AND sc.active=1 WHERE u.active=1 AND pp.available=1 AND pp.latitude IS NOT NULL AND pp.longitude IS NOT NULL GROUP BY pp.id ORDER BY pp.average_rating DESC,pp.total_reviews DESC,pp.id DESC LIMIT 200`).all(); return json(out.results||[]);
+        const out:any=await db.prepare(`SELECT pp.id,COALESCE(pp.professional_name,u.full_name) AS name,COALESCE(sc.name,ps.title,'Serviços') AS category,COALESCE(pp.description,ps.description,'') AS description,u.city,CASE WHEN pp.exact_location_public=1 THEN u.address ELSE NULL END AS address,pp.average_rating AS rating,pp.total_reviews AS review_count,pp.latitude,pp.longitude,pp.available,pp.verified,u.profile_image AS image FROM provider_profiles pp JOIN users u ON u.id=pp.user_id LEFT JOIN provider_services ps ON ps.provider_id=pp.id AND ps.active=1 LEFT JOIN service_categories sc ON sc.id=ps.category_id AND sc.active=1 WHERE u.active=1 AND pp.available=1 AND pp.latitude IS NOT NULL AND pp.longitude IS NOT NULL GROUP BY pp.id ORDER BY pp.average_rating DESC,pp.total_reviews DESC,pp.id DESC LIMIT 200`).all(); return json(out.results||[]);
       }
 
       // Solicitações: criar/listar
@@ -236,7 +238,7 @@ export default {
         const user:any=await sessionUser(request,db); if(!user||user.role!=='client')return json({error:'Acesso exclusivo do cliente.'},{status:403}); const quoteId=Number(quoteDecisionMatch[1]); const b=await readBody(request); const decision=String(b.decision||''); if(!['accepted','rejected'].includes(decision))return json({error:'Decisão inválida.'},{status:400});
         const q:any=await db.prepare(`SELECT q.id,q.request_id,q.provider_id,q.status,sr.client_id,sr.status AS request_status FROM quotes q JOIN service_requests sr ON sr.id=q.request_id WHERE q.id=?`).bind(quoteId).first(); if(!q||Number(q.client_id)!==Number(user.id))return json({error:'Orçamento não encontrado.'},{status:404}); if(!['pending','accepted'].includes(q.status))return json({error:'Este orçamento já foi finalizado.'},{status:409});
         if(decision==='accepted'){
-          await db.batch([db.prepare(`UPDATE quotes SET status='accepted',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(quoteId),db.prepare(`UPDATE service_requests SET status='accepted',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(q.request_id)]);
+          await db.batch([db.prepare(`UPDATE quotes SET status='accepted',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(quoteId),db.prepare(`UPDATE service_requests SET status='accepted',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(q.request_id),db.prepare(`INSERT OR IGNORE INTO service_chats(request_id,status,created_at,updated_at) VALUES(?,'open',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).bind(q.request_id)]);
         } else {
           await db.batch([db.prepare(`UPDATE quotes SET status='rejected',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(quoteId),db.prepare(`UPDATE service_requests SET status='open',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(q.request_id)]);
         }
@@ -262,7 +264,7 @@ export default {
       }
 
       if(url.pathname==='/api/favorites'&&request.method==='GET'){
-        const user:any=await sessionUser(request,db); if(!user||user.role!=='client')return json({error:'Acesso exclusivo do cliente.'},{status:403}); const out:any=await db.prepare(`SELECT f.provider_id AS id,COALESCE(pp.professional_name,pu.full_name) AS name,COALESCE(sc.name,ps.title,'Serviços') AS category,pp.average_rating AS rating,pp.total_reviews AS review_count,pp.latitude,pp.longitude,pp.available,pp.verified,pp.description FROM favorites f JOIN provider_profiles pp ON pp.id=f.provider_id JOIN users pu ON pu.id=pp.user_id LEFT JOIN provider_services ps ON ps.provider_id=pp.id AND ps.active=1 LEFT JOIN service_categories sc ON sc.id=ps.category_id WHERE f.client_id=? GROUP BY f.provider_id ORDER BY f.created_at DESC`).bind(user.id).all(); return json({favorites:out.results||[]});
+        const user:any=await sessionUser(request,db); if(!user||user.role!=='client')return json({error:'Acesso exclusivo do cliente.'},{status:403}); const out:any=await db.prepare(`SELECT f.provider_id AS id,COALESCE(pp.professional_name,pu.full_name) AS name,COALESCE(sc.name,ps.title,'Serviços') AS category,pp.average_rating AS rating,pp.total_reviews AS review_count,pp.latitude,pp.longitude,pp.available,pp.verified,pp.description,pu.profile_image AS image FROM favorites f JOIN provider_profiles pp ON pp.id=f.provider_id JOIN users pu ON pu.id=pp.user_id LEFT JOIN provider_services ps ON ps.provider_id=pp.id AND ps.active=1 LEFT JOIN service_categories sc ON sc.id=ps.category_id WHERE f.client_id=? GROUP BY f.provider_id ORDER BY f.created_at DESC`).bind(user.id).all(); return json({favorites:out.results||[]});
       }
       if(url.pathname==='/api/favorites'&&request.method==='POST'){
         const user:any=await sessionUser(request,db); if(!user||user.role!=='client')return json({error:'Acesso exclusivo do cliente.'},{status:403}); const b=await readBody(request); const providerId=Number(b.providerId||0); if(!providerId)return json({error:'Profissional inválido.'},{status:400}); await db.prepare('INSERT OR IGNORE INTO favorites(client_id,provider_id,created_at) VALUES(?,?,CURRENT_TIMESTAMP)').bind(user.id,providerId).run(); return json({ok:true},{status:201});
@@ -270,6 +272,46 @@ export default {
       const favMatch=url.pathname.match(/^\/api\/favorites\/(\d+)$/);
       if(favMatch&&request.method==='DELETE'){
         const user:any=await sessionUser(request,db); if(!user||user.role!=='client')return json({error:'Acesso exclusivo do cliente.'},{status:403}); await db.prepare('DELETE FROM favorites WHERE client_id=? AND provider_id=?').bind(user.id,Number(favMatch[1])).run(); return json({ok:true});
+      }
+
+
+      // Imagem de perfil opcional (armazenada como Data URL comprimida pelo navegador).
+      if(url.pathname==='/api/profile/image'&&request.method==='PUT'){
+        const user:any=await sessionUser(request,db); if(!user)return json({error:'Sessão inválida ou expirada.'},{status:401});
+        const b=await readBody(request); const image=String(b.image||'');
+        if(!/^data:image\/(jpeg|png|webp);base64,/i.test(image))return json({error:'Envie uma imagem JPG, PNG ou WebP válida.'},{status:400});
+        if(image.length>520000)return json({error:'A imagem ficou muito grande. Use uma foto menor.'},{status:413});
+        await db.prepare('UPDATE users SET profile_image=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(image,user.id).run();
+        return json({ok:true,image});
+      }
+      if(url.pathname==='/api/profile/image'&&request.method==='DELETE'){
+        const user:any=await sessionUser(request,db); if(!user)return json({error:'Sessão inválida ou expirada.'},{status:401});
+        await db.prepare('UPDATE users SET profile_image=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(user.id).run(); return json({ok:true});
+      }
+
+      // Chat do serviço. Só existe depois que o cliente aceita o orçamento.
+      const chatMatch=url.pathname.match(/^\/api\/service-requests\/(\d+)\/chat$/);
+      if(chatMatch&&request.method==='GET'){
+        const user:any=await sessionUser(request,db); if(!user)return json({error:'Sessão inválida ou expirada.'},{status:401}); const requestId=Number(chatMatch[1]);
+        const row:any=await db.prepare(`SELECT sr.id,sr.client_id,sr.target_provider_id,sr.status,cu.full_name AS client_name,pu.full_name AS provider_name,q.status AS quote_status FROM service_requests sr JOIN users cu ON cu.id=sr.client_id JOIN provider_profiles pp ON pp.id=sr.target_provider_id JOIN users pu ON pu.id=pp.user_id LEFT JOIN quotes q ON q.request_id=sr.id AND q.provider_id=sr.target_provider_id WHERE sr.id=?`).bind(requestId).first();
+        if(!row)return json({error:'Solicitação não encontrada.'},{status:404}); const provider:any=user.role==='provider'?await providerForUser(db,user.id):null; const participant=Number(row.client_id)===Number(user.id)||(provider&&Number(row.target_provider_id)===Number(provider.id)); if(!participant)return json({error:'Sem permissão para este chat.'},{status:403});
+        if(row.quote_status!=='accepted'||!['accepted','in_progress','completed'].includes(row.status))return json({error:'O chat é liberado somente após o orçamento ser aceito.'},{status:409});
+        await db.prepare(`INSERT OR IGNORE INTO service_chats(request_id,status,created_at,updated_at) VALUES(?,'open',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).bind(requestId).run(); const chat:any=await db.prepare('SELECT * FROM service_chats WHERE request_id=?').bind(requestId).first();
+        const messages:any=await db.prepare(`SELECT cm.id,cm.sender_user_id,cm.message_type,cm.message,cm.latitude,cm.longitude,cm.created_at,u.full_name AS sender_name FROM chat_messages cm JOIN users u ON u.id=cm.sender_user_id WHERE cm.chat_id=? ORDER BY cm.id ASC LIMIT 500`).bind(chat.id).all();
+        return json({currentUserId:user.id,chat:{id:chat.id,status:chat.status,requestId,clientName:row.client_name,providerName:row.provider_name,requestStatus:row.status},messages:messages.results||[]});
+      }
+      if(chatMatch&&request.method==='POST'){
+        const user:any=await sessionUser(request,db); if(!user)return json({error:'Sessão inválida ou expirada.'},{status:401}); const requestId=Number(chatMatch[1]); const b=await readBody(request);
+        const row:any=await db.prepare(`SELECT sr.id,sr.client_id,sr.target_provider_id,sr.status,q.status AS quote_status FROM service_requests sr LEFT JOIN quotes q ON q.request_id=sr.id AND q.provider_id=sr.target_provider_id WHERE sr.id=?`).bind(requestId).first(); if(!row)return json({error:'Solicitação não encontrada.'},{status:404}); const provider:any=user.role==='provider'?await providerForUser(db,user.id):null; const participant=Number(row.client_id)===Number(user.id)||(provider&&Number(row.target_provider_id)===Number(provider.id)); if(!participant)return json({error:'Sem permissão para este chat.'},{status:403}); if(row.quote_status!=='accepted'||!['accepted','in_progress','completed'].includes(row.status))return json({error:'O chat ainda não está disponível.'},{status:409});
+        await db.prepare(`INSERT OR IGNORE INTO service_chats(request_id,status,created_at,updated_at) VALUES(?,'open',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).bind(requestId).run(); const chat:any=await db.prepare('SELECT * FROM service_chats WHERE request_id=?').bind(requestId).first(); if(chat.status!=='open')return json({error:'Este chat foi encerrado pelo cliente.'},{status:409});
+        const type=String(b.type||'text'); if(!['text','location'].includes(type))return json({error:'Tipo de mensagem inválido.'},{status:400}); let message=String(b.message||'').trim().slice(0,2000); let lat=null,lng=null;
+        if(type==='text'&&!message)return json({error:'Digite uma mensagem.'},{status:400}); if(type==='location'){lat=Number(b.latitude);lng=Number(b.longitude);if(!Number.isFinite(lat)||!Number.isFinite(lng))return json({error:'Localização inválida.'},{status:400});message=message||'Localização compartilhada pelo cliente.';}
+        const result:any=await db.prepare(`INSERT INTO chat_messages(chat_id,sender_user_id,message_type,message,latitude,longitude,created_at) VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP)`).bind(chat.id,user.id,type,message,lat,lng).run(); await db.prepare('UPDATE service_chats SET updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(chat.id).run(); return json({ok:true,id:result.meta?.last_row_id||null},{status:201});
+      }
+      const chatCloseMatch=url.pathname.match(/^\/api\/service-requests\/(\d+)\/chat\/close$/);
+      if(chatCloseMatch&&request.method==='POST'){
+        const user:any=await sessionUser(request,db); if(!user||user.role!=='client')return json({error:'Somente o cliente pode encerrar o chat.'},{status:403}); const requestId=Number(chatCloseMatch[1]); const row:any=await db.prepare('SELECT id,client_id,status FROM service_requests WHERE id=?').bind(requestId).first(); if(!row||Number(row.client_id)!==Number(user.id))return json({error:'Solicitação não encontrada.'},{status:404}); if(!['accepted','in_progress','completed'].includes(row.status))return json({error:'Este chat ainda não pode ser encerrado.'},{status:409});
+        await db.prepare(`UPDATE service_chats SET status='closed',closed_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE request_id=?`).bind(user.id,requestId).run(); return json({ok:true,status:'closed'});
       }
 
       if(url.pathname==='/api/provider/profile'&&request.method==='PUT'){
