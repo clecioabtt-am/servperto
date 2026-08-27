@@ -35,13 +35,9 @@ Após o deploy, teste `/api/schema-health`. O retorno deve conter `"ok": true`.
 - Reorganiza os cards de profissionais no painel do cliente para evitar informações cortadas.
 - Exibe nome, avaliação, categoria, cidade, distância, disponibilidade e descrição de forma responsiva.
 
-
-## ServPerto v0.9.3
-- Mapa do cliente filtrado automaticamente pela categoria selecionada.
-- Ordenação por proximidade ao usar a localização do cliente.
-- Marcadores do mapa usam a foto do profissional quando disponível.
-- Favoritos com estado visual e remoção rápida.
-- Prestador pode alternar Disponível/Indisponível no painel.
-- Chat pode ser ocultado individualmente por cliente ou prestador.
-- Transições iniciar/concluir serviço idempotentes.
-- Aplicar migrations/0005_marketplace_experience.sql no D1 antes do deploy.
+## ServPerto v1.0 — PWA e responsividade
+- Layout otimizado para desktop, tablets e smartphones Android.
+- Manifesto PWA e Service Worker incluídos.
+- Instalação na tela inicial pelo botão “Instalar ServPerto” quando suportado pelo navegador.
+- Em Android/Chrome, também pode ser instalado pelo menu do navegador → “Instalar app” / “Adicionar à tela inicial”.
+- Cache apenas de recursos públicos; rotas `/api/*` continuam online e não são armazenadas pelo Service Worker.

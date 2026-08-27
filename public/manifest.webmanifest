@@ -1,0 +1,19 @@
+{
+  "name": "ServPerto",
+  "short_name": "ServPerto",
+  "description": "Marketplace local para encontrar e contratar profissionais próximos.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f9fc",
+  "theme_color": "#087f95",
+  "orientation": "portrait-primary",
+  "icons": [
+    {"src":"/icons/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+    {"src":"/icons/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ],
+  "shortcuts": [
+    {"name":"Buscar profissionais","short_name":"Buscar","url":"/?acao=buscar","icons":[{"src":"/icons/icon-192.png","sizes":"192x192"}]},
+    {"name":"Entrar","short_name":"Entrar","url":"/?acao=entrar","icons":[{"src":"/icons/icon-192.png","sizes":"192x192"}]}
+  ]
+}
