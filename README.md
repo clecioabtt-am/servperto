@@ -45,3 +45,26 @@ Após o deploy, teste `/api/schema-health`. O retorno deve conter `"ok": true`.
 
 ## ServPerto v1.1
 Inclui marcadores com foto de perfil no mapa, central de notificações, agenda de atendimentos, portfólio profissional e selos de reputação. Execute `migrations/0005_professional_evolution.sql` uma única vez no D1 antes do deploy da v1.1.
+
+
+## ServPerto v1.2.0 — Suporte, status e marcador profissional
+
+Esta versão adiciona:
+
+- foto do prestador recortada corretamente dentro do pin do mapa;
+- pin verde para profissional disponível e laranja para indisponível;
+- profissionais indisponíveis continuam visíveis no mapa, mas não recebem novas solicitações;
+- seletor de status no perfil do prestador;
+- opção de exclusão/desativação da própria conta para clientes e prestadores;
+- painel de Suporte / Administração;
+- remoção e reativação de contas pelo suporte;
+- verificação/desverificação de prestadores;
+- moderação e remoção de avaliações com recálculo automático da nota.
+
+### Migração obrigatória
+
+Antes de usar o painel de suporte, execute **uma vez** no D1 o arquivo:
+
+`migrations/0006_support_admin.sql`
+
+A conta administrativa criada pela migração usa o login `suporte.servperto`. A senha temporária e o código de recuperação não ficam em texto puro dentro do repositório.

@@ -83,14 +83,14 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     try {
-      if (url.pathname === '/api/health') return json({ ok: true, app: 'ServPerto', version: '1.1.0', runtime: 'Cloudflare Workers', database: Boolean(env.DB) });
+      if (url.pathname === '/api/health') return json({ ok: true, app: 'ServPerto', version: '1.2.0', runtime: 'Cloudflare Workers', database: Boolean(env.DB) });
       if (url.pathname.startsWith('/api/') && !env.DB) return json({ error: 'Banco D1 não vinculado. Adicione o binding DB ao Worker servperto.' }, { status: 503 });
       const db = env.DB;
 
       if (url.pathname === '/api/db-health') {
         const row: any = await db.prepare("SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table'").first();
         const users: any = await db.prepare('SELECT COUNT(*) AS total FROM users').first();
-        return json({ ok: true, database: true, tables: Number(row?.total || 0), users: Number(users?.total || 0), version: '1.1.0' });
+        return json({ ok: true, database: true, tables: Number(row?.total || 0), users: Number(users?.total || 0), version: '1.2.0' });
       }
 
       if (url.pathname === '/api/schema-health') {
@@ -115,7 +115,7 @@ export default {
           if (!columns.length || missing.length) healthy = false;
           report[table] = { exists: columns.length > 0, missing };
         }
-        return json({ ok: healthy, database: true, version: '1.1.0', schema: report }, { status: healthy ? 200 : 500 });
+        return json({ ok: healthy, database: true, version: '1.2.0', schema: report }, { status: healthy ? 200 : 500 });
       }
 
       if (url.pathname === '/api/auth/register' && request.method === 'POST') {
@@ -209,7 +209,7 @@ export default {
       }
 
       if(url.pathname==='/api/professionals'&&request.method==='GET'){
-        const out:any=await db.prepare(`SELECT pp.id,COALESCE(pp.professional_name,u.full_name) AS name,COALESCE(sc.name,ps.title,'Serviços') AS category,COALESCE(pp.description,ps.description,'') AS description,u.city,CASE WHEN pp.exact_location_public=1 THEN u.address ELSE NULL END AS address,pp.average_rating AS rating,pp.total_reviews AS review_count,pp.latitude,pp.longitude,pp.available,pp.verified,u.profile_image AS image,u.created_at AS joined_at,(SELECT COUNT(*) FROM service_requests x WHERE x.target_provider_id=pp.id AND x.status='completed') AS completed_count FROM provider_profiles pp JOIN users u ON u.id=pp.user_id LEFT JOIN provider_services ps ON ps.provider_id=pp.id AND ps.active=1 LEFT JOIN service_categories sc ON sc.id=ps.category_id AND sc.active=1 WHERE u.active=1 AND pp.available=1 AND pp.latitude IS NOT NULL AND pp.longitude IS NOT NULL GROUP BY pp.id ORDER BY pp.average_rating DESC,pp.total_reviews DESC,pp.id DESC LIMIT 200`).all(); return json(out.results||[]);
+        const out:any=await db.prepare(`SELECT pp.id,COALESCE(pp.professional_name,u.full_name) AS name,COALESCE(sc.name,ps.title,'Serviços') AS category,COALESCE(pp.description,ps.description,'') AS description,u.city,CASE WHEN pp.exact_location_public=1 THEN u.address ELSE NULL END AS address,pp.average_rating AS rating,pp.total_reviews AS review_count,pp.latitude,pp.longitude,pp.available,pp.verified,u.profile_image AS image,u.created_at AS joined_at,(SELECT COUNT(*) FROM service_requests x WHERE x.target_provider_id=pp.id AND x.status='completed') AS completed_count FROM provider_profiles pp JOIN users u ON u.id=pp.user_id LEFT JOIN provider_services ps ON ps.provider_id=pp.id AND ps.active=1 LEFT JOIN service_categories sc ON sc.id=ps.category_id AND sc.active=1 WHERE u.active=1 AND pp.latitude IS NOT NULL AND pp.longitude IS NOT NULL GROUP BY pp.id ORDER BY pp.average_rating DESC,pp.total_reviews DESC,pp.id DESC LIMIT 200`).all(); return json(out.results||[]);
       }
 
       // Solicitações: criar/listar
@@ -349,9 +349,35 @@ export default {
         await db.prepare(`UPDATE service_chats SET status='closed',closed_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE request_id=?`).bind(user.id,requestId).run(); return json({ok:true,status:'closed'});
       }
 
+      // Exclusão da própria conta: desativação segura (soft delete).
+      if(url.pathname==='/api/account'&&request.method==='DELETE'){
+        const user:any=await sessionUser(request,db); if(!user)return json({error:'Sessão inválida ou expirada.'},{status:401}); if(user.role==='admin')return json({error:'A conta administrativa deve ser gerenciada diretamente no banco para evitar bloqueio acidental.'},{status:403}); const b=await readBody(request); if(String(b.confirm||'').toUpperCase()!=='EXCLUIR')return json({error:'Confirmação inválida.'},{status:400});
+        await db.prepare('UPDATE users SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(user.id).run(); if(user.role==='provider')await db.prepare('UPDATE provider_profiles SET available=0,updated_at=CURRENT_TIMESTAMP WHERE user_id=?').bind(user.id).run(); await db.prepare('DELETE FROM sessions WHERE user_id=?').bind(user.id).run(); return json({ok:true});
+      }
+
+      // Painel de suporte/administração.
+      if(url.pathname==='/api/admin/users'&&request.method==='GET'){
+        const admin:any=await sessionUser(request,db); if(!admin||admin.role!=='admin')return json({error:'Acesso exclusivo do suporte.'},{status:403}); const out:any=await db.prepare(`SELECT u.id,u.full_name AS name,u.username,u.role,u.phone,u.city,u.active,u.created_at,pp.id AS provider_id,pp.available,pp.verified,pp.average_rating AS rating,pp.total_reviews AS review_count FROM users u LEFT JOIN provider_profiles pp ON pp.user_id=u.id ORDER BY u.created_at DESC,u.id DESC LIMIT 500`).all(); return json({users:out.results||[]});
+      }
+      const adminUserStatus=url.pathname.match(/^\/api\/admin\/users\/(\d+)\/status$/);
+      if(adminUserStatus&&request.method==='POST'){
+        const admin:any=await sessionUser(request,db); if(!admin||admin.role!=='admin')return json({error:'Acesso exclusivo do suporte.'},{status:403}); const userId=Number(adminUserStatus[1]); if(userId===Number(admin.id))return json({error:'Você não pode desativar sua própria conta administrativa.'},{status:409}); const b=await readBody(request); const active=b.active===true||b.active===1||b.active==='1'; const target:any=await db.prepare('SELECT id,role FROM users WHERE id=?').bind(userId).first(); if(!target)return json({error:'Conta não encontrada.'},{status:404}); await db.prepare('UPDATE users SET active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(active?1:0,userId).run(); if(target.role==='provider'&&!active)await db.prepare('UPDATE provider_profiles SET available=0,updated_at=CURRENT_TIMESTAMP WHERE user_id=?').bind(userId).run(); if(!active)await db.prepare('DELETE FROM sessions WHERE user_id=?').bind(userId).run(); return json({ok:true,active});
+      }
+      if(url.pathname==='/api/admin/reviews'&&request.method==='GET'){
+        const admin:any=await sessionUser(request,db); if(!admin||admin.role!=='admin')return json({error:'Acesso exclusivo do suporte.'},{status:403}); const out:any=await db.prepare(`SELECT r.id,r.rating,r.comment,r.created_at,r.provider_id,cu.full_name AS client_name,COALESCE(pp.professional_name,pu.full_name) AS provider_name FROM reviews r JOIN users cu ON cu.id=r.client_id JOIN provider_profiles pp ON pp.id=r.provider_id JOIN users pu ON pu.id=pp.user_id ORDER BY r.created_at DESC LIMIT 500`).all(); return json({reviews:out.results||[]});
+      }
+      const adminReviewDelete=url.pathname.match(/^\/api\/admin\/reviews\/(\d+)$/);
+      if(adminReviewDelete&&request.method==='DELETE'){
+        const admin:any=await sessionUser(request,db); if(!admin||admin.role!=='admin')return json({error:'Acesso exclusivo do suporte.'},{status:403}); const reviewId=Number(adminReviewDelete[1]); const review:any=await db.prepare('SELECT id,provider_id FROM reviews WHERE id=?').bind(reviewId).first(); if(!review)return json({error:'Avaliação não encontrada.'},{status:404}); await db.prepare('DELETE FROM reviews WHERE id=?').bind(reviewId).run(); await refreshProviderRating(db,Number(review.provider_id)); return json({ok:true});
+      }
+      const adminVerified=url.pathname.match(/^\/api\/admin\/providers\/(\d+)\/verified$/);
+      if(adminVerified&&request.method==='POST'){
+        const admin:any=await sessionUser(request,db); if(!admin||admin.role!=='admin')return json({error:'Acesso exclusivo do suporte.'},{status:403}); const b=await readBody(request); const verified=b.verified===true||b.verified===1||b.verified==='1'; await db.prepare('UPDATE provider_profiles SET verified=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(verified?1:0,Number(adminVerified[1])).run(); return json({ok:true,verified});
+      }
+
       if(url.pathname==='/api/provider/profile'&&request.method==='PUT'){
         const user:any=await sessionUser(request,db); if(!user||user.role!=='provider')return json({error:'Acesso exclusivo do prestador.'},{status:403}); const provider:any=await providerForUser(db,user.id); if(!provider)return json({error:'Perfil não encontrado.'},{status:404}); const b=await readBody(request);
-        const name=String(b.professionalName||provider.professional_name||user.full_name).trim(); const description=String(b.description??provider.description??'').trim().slice(0,1200); const available=b.available===true||b.available==='1'||b.available===1; const exact=b.exactLocationPublic===true||b.exactLocationPublic==='1'||b.exactLocationPublic===1;
+        const name=String(b.professionalName||provider.professional_name||user.full_name).trim(); const description=String(b.description??provider.description??'').trim().slice(0,1200); const available=b.availabilityStatus?String(b.availabilityStatus)==='available':(b.available===true||b.available==='1'||b.available===1); const exact=b.exactLocationPublic===true||b.exactLocationPublic==='1'||b.exactLocationPublic===1;
         await db.prepare('UPDATE provider_profiles SET professional_name=?,description=?,available=?,exact_location_public=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(name,description,available?1:0,exact?1:0,provider.id).run(); return json({ok:true});
       }
 
