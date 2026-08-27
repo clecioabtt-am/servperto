@@ -78,14 +78,14 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     try {
-      if (url.pathname === '/api/health') return json({ ok: true, app: 'ServPerto', version: '0.9.2', runtime: 'Cloudflare Workers', database: Boolean(env.DB) });
+      if (url.pathname === '/api/health') return json({ ok: true, app: 'ServPerto', version: '0.9.3', runtime: 'Cloudflare Workers', database: Boolean(env.DB) });
       if (url.pathname.startsWith('/api/') && !env.DB) return json({ error: 'Banco D1 não vinculado. Adicione o binding DB ao Worker servperto.' }, { status: 503 });
       const db = env.DB;
 
       if (url.pathname === '/api/db-health') {
         const row: any = await db.prepare("SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table'").first();
         const users: any = await db.prepare('SELECT COUNT(*) AS total FROM users').first();
-        return json({ ok: true, database: true, tables: Number(row?.total || 0), users: Number(users?.total || 0), version: '0.9.2' });
+        return json({ ok: true, database: true, tables: Number(row?.total || 0), users: Number(users?.total || 0), version: '0.9.3' });
       }
 
       if (url.pathname === '/api/schema-health') {
@@ -108,7 +108,7 @@ export default {
           if (!columns.length || missing.length) healthy = false;
           report[table] = { exists: columns.length > 0, missing };
         }
-        return json({ ok: healthy, database: true, version: '0.9.2', schema: report }, { status: healthy ? 200 : 500 });
+        return json({ ok: healthy, database: true, version: '0.9.3', schema: report }, { status: healthy ? 200 : 500 });
       }
 
       if (url.pathname === '/api/auth/register' && request.method === 'POST') {
@@ -196,7 +196,7 @@ export default {
         const providerId=Number(proMatch[1]); const professional:any=await db.prepare(`SELECT pp.id,COALESCE(pp.professional_name,u.full_name) AS name,COALESCE(sc.name,ps.title,'Serviços') AS category,COALESCE(pp.description,ps.description,'') AS description,u.city,CASE WHEN pp.exact_location_public=1 THEN u.address ELSE NULL END AS address,pp.average_rating AS rating,pp.total_reviews AS review_count,pp.latitude,pp.longitude,pp.available,pp.verified,u.profile_image AS image FROM provider_profiles pp JOIN users u ON u.id=pp.user_id LEFT JOIN provider_services ps ON ps.provider_id=pp.id AND ps.active=1 LEFT JOIN service_categories sc ON sc.id=ps.category_id AND sc.active=1 WHERE pp.id=? AND u.active=1 GROUP BY pp.id`).bind(providerId).first();
         if(!professional)return json({error:'Profissional não encontrado.'},{status:404});
         const services:any=await db.prepare('SELECT ps.id,ps.title,ps.description,ps.price_from,sc.name AS category FROM provider_services ps JOIN service_categories sc ON sc.id=ps.category_id WHERE ps.provider_id=? AND ps.active=1 ORDER BY ps.created_at').bind(providerId).all();
-        const reviews:any=await db.prepare('SELECT r.id,r.rating,r.comment,r.created_at,u.full_name AS client_name FROM reviews r JOIN users u ON u.id=r.client_id WHERE r.provider_id=? ORDER BY r.created_at DESC LIMIT 30').bind(providerId).all();
+        const reviews:any=await db.prepare('SELECT r.id,r.rating,r.created_at,u.full_name AS client_name FROM reviews r JOIN users u ON u.id=r.client_id WHERE r.provider_id=? ORDER BY r.created_at DESC LIMIT 30').bind(providerId).all();
         return json({professional,services:services.results||[],reviews:reviews.results||[]});
       }
 
@@ -257,7 +257,7 @@ export default {
       }
 
       if(url.pathname==='/api/reviews'&&request.method==='POST'){
-        const user:any=await sessionUser(request,db); if(!user||user.role!=='client')return json({error:'Somente clientes podem avaliar.'},{status:403}); const b=await readBody(request); const requestId=Number(b.requestId||0); const rating=Number(b.rating||0); const comment=String(b.comment||'').trim(); if(!requestId||rating<1||rating>5)return json({error:'Informe uma nota entre 1 e 5.'},{status:400});
+        const user:any=await sessionUser(request,db); if(!user||user.role!=='client')return json({error:'Somente clientes podem avaliar.'},{status:403}); const b=await readBody(request); const requestId=Number(b.requestId||0); const rating=Number(b.rating||0); const comment=''; if(!requestId||rating<1||rating>5)return json({error:'Informe uma nota entre 1 e 5.'},{status:400});
         const reqRow:any=await db.prepare(`SELECT sr.id,sr.client_id,sr.target_provider_id,sr.status,q.status AS quote_status FROM service_requests sr LEFT JOIN quotes q ON q.request_id=sr.id AND q.provider_id=sr.target_provider_id WHERE sr.id=?`).bind(requestId).first(); if(!reqRow||Number(reqRow.client_id)!==Number(user.id))return json({error:'Serviço não encontrado.'},{status:404}); if(reqRow.status!=='completed'||reqRow.quote_status!=='accepted')return json({error:'A avaliação só é liberada após um serviço concluído.'},{status:409});
         try { await db.prepare(`INSERT INTO reviews(request_id,client_id,provider_id,rating,comment,created_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)`).bind(requestId,user.id,reqRow.target_provider_id,rating,comment).run(); } catch(e:any){ if(String(e?.message||e).toLowerCase().includes('unique'))return json({error:'Você já avaliou este serviço.'},{status:409}); throw e; }
         await refreshProviderRating(db,Number(reqRow.target_provider_id)); return json({ok:true},{status:201});

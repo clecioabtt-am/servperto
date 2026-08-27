@@ -36,7 +36,7 @@ Após o deploy, teste `/api/schema-health`. O retorno deve conter `"ok": true`.
 - Exibe nome, avaliação, categoria, cidade, distância, disponibilidade e descrição de forma responsiva.
 
 
-## ServPerto v0.9.2
+## ServPerto v0.9.3
 - Mapa do cliente filtrado automaticamente pela categoria selecionada.
 - Ordenação por proximidade ao usar a localização do cliente.
 - Marcadores do mapa usam a foto do profissional quando disponível.

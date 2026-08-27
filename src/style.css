@@ -40,3 +40,12 @@
 .availabilityCard{display:flex;justify-content:space-between;align-items:center;gap:20px;margin:20px 0}.availabilityCard>div:first-child{display:flex;gap:13px;align-items:center}.availabilityCard p{margin:4px 0 0;color:#607986}.statusDot{width:16px;height:16px;border-radius:50%;display:inline-block;flex:0 0 auto}.availableDot{background:#28c67a;box-shadow:0 0 0 5px rgba(40,198,122,.12)}.unavailableDot{background:#9aa9b0;box-shadow:0 0 0 5px rgba(154,169,176,.12)}.availabilityActions{display:flex;gap:8px;flex-wrap:wrap}
 button:disabled{opacity:.55;cursor:not-allowed}
 @media(max-width:650px){.clientMapControls.simple{grid-template-columns:1fr}.availabilityCard{align-items:flex-start;flex-direction:column}.availabilityActions{width:100%}.availabilityActions button{flex:1}}
+
+/* v0.9.3 - foto confinada ao marcador e avaliação somente por estrelas */
+.proMapPin{width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important;max-width:44px!important;max-height:44px!important;overflow:visible!important}
+.proMapPin.hasPhoto{padding:3px;background:#fff}
+.proMapPhoto{width:100%;height:100%;border-radius:50%;background-position:center;background-repeat:no-repeat;background-size:cover;overflow:hidden}
+.proMapPin.hasPhoto img{display:none!important;width:0!important;height:0!important;max-width:0!important;max-height:0!important}
+.proMapIconWrap,.leaflet-marker-icon.proMapIconWrap{width:46px!important;height:54px!important;max-width:46px!important;max-height:54px!important;background:transparent!important;border:0!important}
+.reviewHelp{margin-top:-8px;color:#607986}
+.review small{display:block;margin-top:6px}
