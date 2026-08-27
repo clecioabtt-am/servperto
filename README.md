@@ -41,3 +41,7 @@ Após o deploy, teste `/api/schema-health`. O retorno deve conter `"ok": true`.
 - Instalação na tela inicial pelo botão “Instalar ServPerto” quando suportado pelo navegador.
 - Em Android/Chrome, também pode ser instalado pelo menu do navegador → “Instalar app” / “Adicionar à tela inicial”.
 - Cache apenas de recursos públicos; rotas `/api/*` continuam online e não são armazenadas pelo Service Worker.
+
+
+## ServPerto v1.1
+Inclui marcadores com foto de perfil no mapa, central de notificações, agenda de atendimentos, portfólio profissional e selos de reputação. Execute `migrations/0005_professional_evolution.sql` uma única vez no D1 antes do deploy da v1.1.
