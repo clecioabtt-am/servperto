@@ -78,14 +78,14 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     try {
-      if (url.pathname === '/api/health') return json({ ok: true, app: 'ServPerto', version: '0.9.0', runtime: 'Cloudflare Workers', database: Boolean(env.DB) });
+      if (url.pathname === '/api/health') return json({ ok: true, app: 'ServPerto', version: '0.9.2', runtime: 'Cloudflare Workers', database: Boolean(env.DB) });
       if (url.pathname.startsWith('/api/') && !env.DB) return json({ error: 'Banco D1 não vinculado. Adicione o binding DB ao Worker servperto.' }, { status: 503 });
       const db = env.DB;
 
       if (url.pathname === '/api/db-health') {
         const row: any = await db.prepare("SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table'").first();
         const users: any = await db.prepare('SELECT COUNT(*) AS total FROM users').first();
-        return json({ ok: true, database: true, tables: Number(row?.total || 0), users: Number(users?.total || 0), version: '0.9.0' });
+        return json({ ok: true, database: true, tables: Number(row?.total || 0), users: Number(users?.total || 0), version: '0.9.2' });
       }
 
       if (url.pathname === '/api/schema-health') {
@@ -97,7 +97,7 @@ export default {
           quotes: ['id','request_id','provider_id','price','message','status'],
           reviews: ['id','request_id','client_id','provider_id','rating'],
           favorites: ['id','client_id','provider_id'],
-          service_chats: ['id','request_id','status','closed_by_user_id','created_at','updated_at'],
+          service_chats: ['id','request_id','status','closed_by_user_id','client_hidden','provider_hidden','created_at','updated_at'],
           chat_messages: ['id','chat_id','sender_user_id','message_type','message','latitude','longitude','created_at']
         };
         const report: Record<string, any> = {}; let healthy = true;
@@ -108,7 +108,7 @@ export default {
           if (!columns.length || missing.length) healthy = false;
           report[table] = { exists: columns.length > 0, missing };
         }
-        return json({ ok: healthy, database: true, version: '0.9.0', schema: report }, { status: healthy ? 200 : 500 });
+        return json({ ok: healthy, database: true, version: '0.9.2', schema: report }, { status: healthy ? 200 : 500 });
       }
 
       if (url.pathname === '/api/auth/register' && request.method === 'POST') {
@@ -201,7 +201,7 @@ export default {
       }
 
       if(url.pathname==='/api/professionals'&&request.method==='GET'){
-        const out:any=await db.prepare(`SELECT pp.id,COALESCE(pp.professional_name,u.full_name) AS name,COALESCE(sc.name,ps.title,'Serviços') AS category,COALESCE(pp.description,ps.description,'') AS description,u.city,CASE WHEN pp.exact_location_public=1 THEN u.address ELSE NULL END AS address,pp.average_rating AS rating,pp.total_reviews AS review_count,pp.latitude,pp.longitude,pp.available,pp.verified,u.profile_image AS image FROM provider_profiles pp JOIN users u ON u.id=pp.user_id LEFT JOIN provider_services ps ON ps.provider_id=pp.id AND ps.active=1 LEFT JOIN service_categories sc ON sc.id=ps.category_id AND sc.active=1 WHERE u.active=1 AND pp.available=1 AND pp.latitude IS NOT NULL AND pp.longitude IS NOT NULL GROUP BY pp.id ORDER BY pp.average_rating DESC,pp.total_reviews DESC,pp.id DESC LIMIT 200`).all(); return json(out.results||[]);
+        const out:any=await db.prepare(`SELECT pp.id,COALESCE(pp.professional_name,u.full_name) AS name,COALESCE(sc.name,ps.title,'Serviços') AS category,COALESCE(pp.description,ps.description,'') AS description,u.city,CASE WHEN pp.exact_location_public=1 THEN u.address ELSE NULL END AS address,pp.average_rating AS rating,pp.total_reviews AS review_count,pp.latitude,pp.longitude,pp.available,pp.verified,u.profile_image AS image FROM provider_profiles pp JOIN users u ON u.id=pp.user_id LEFT JOIN provider_services ps ON ps.provider_id=pp.id AND ps.active=1 LEFT JOIN service_categories sc ON sc.id=ps.category_id AND sc.active=1 WHERE u.active=1 AND pp.latitude IS NOT NULL AND pp.longitude IS NOT NULL GROUP BY pp.id ORDER BY pp.average_rating DESC,pp.total_reviews DESC,pp.id DESC LIMIT 200`).all(); return json(out.results||[]);
       }
 
       // Solicitações: criar/listar
@@ -218,10 +218,10 @@ export default {
       if(url.pathname==='/api/service-requests'&&request.method==='GET'){
         const user:any=await sessionUser(request,db); if(!user)return json({error:'Sessão inválida ou expirada.'},{status:401});
         if(user.role==='client'){
-          const out:any=await db.prepare(`SELECT sr.id,sr.title,sr.description,sr.address,sr.status,sr.created_at,sr.updated_at,sr.target_provider_id AS provider_id,COALESCE(pp.professional_name,pu.full_name) AS provider_name,sc.name AS category,q.id AS quote_id,q.price AS quote_price,q.message AS quote_message,q.status AS quote_status,r.id AS review_id FROM service_requests sr LEFT JOIN provider_profiles pp ON pp.id=sr.target_provider_id LEFT JOIN users pu ON pu.id=pp.user_id LEFT JOIN service_categories sc ON sc.id=sr.category_id LEFT JOIN quotes q ON q.request_id=sr.id AND q.provider_id=sr.target_provider_id LEFT JOIN reviews r ON r.request_id=sr.id WHERE sr.client_id=? ORDER BY sr.created_at DESC LIMIT 100`).bind(user.id).all(); return json({requests:out.results||[]});
+          const out:any=await db.prepare(`SELECT sr.id,sr.title,sr.description,sr.address,sr.status,sr.created_at,sr.updated_at,sr.target_provider_id AS provider_id,COALESCE(pp.professional_name,pu.full_name) AS provider_name,sc.name AS category,q.id AS quote_id,q.price AS quote_price,q.message AS quote_message,q.status AS quote_status,r.id AS review_id,COALESCE(ch.client_hidden,0) AS chat_hidden FROM service_requests sr LEFT JOIN service_chats ch ON ch.request_id=sr.id LEFT JOIN provider_profiles pp ON pp.id=sr.target_provider_id LEFT JOIN users pu ON pu.id=pp.user_id LEFT JOIN service_categories sc ON sc.id=sr.category_id LEFT JOIN quotes q ON q.request_id=sr.id AND q.provider_id=sr.target_provider_id LEFT JOIN reviews r ON r.request_id=sr.id WHERE sr.client_id=? ORDER BY sr.created_at DESC LIMIT 100`).bind(user.id).all(); return json({requests:out.results||[]});
         }
         const provider:any=await providerForUser(db,user.id); if(!provider)return json({requests:[]});
-        const out:any=await db.prepare(`SELECT sr.id,sr.title,sr.description,sr.address,sr.status,sr.created_at,sr.updated_at,cu.full_name AS client_name,cu.phone AS client_phone,cu.city AS client_city,sc.name AS category,q.id AS quote_id,q.price AS quote_price,q.message AS quote_message,q.status AS quote_status FROM service_requests sr JOIN users cu ON cu.id=sr.client_id LEFT JOIN service_categories sc ON sc.id=sr.category_id LEFT JOIN quotes q ON q.request_id=sr.id AND q.provider_id=? WHERE sr.target_provider_id=? ORDER BY sr.created_at DESC LIMIT 100`).bind(provider.id,provider.id).all(); return json({requests:out.results||[]});
+        const out:any=await db.prepare(`SELECT sr.id,sr.title,sr.description,sr.address,sr.status,sr.created_at,sr.updated_at,cu.full_name AS client_name,cu.phone AS client_phone,cu.city AS client_city,sc.name AS category,q.id AS quote_id,q.price AS quote_price,q.message AS quote_message,q.status AS quote_status,COALESCE(ch.provider_hidden,0) AS chat_hidden FROM service_requests sr LEFT JOIN service_chats ch ON ch.request_id=sr.id JOIN users cu ON cu.id=sr.client_id LEFT JOIN service_categories sc ON sc.id=sr.category_id LEFT JOIN quotes q ON q.request_id=sr.id AND q.provider_id=? WHERE sr.target_provider_id=? ORDER BY sr.created_at DESC LIMIT 100`).bind(provider.id,provider.id).all(); return json({requests:out.results||[]});
       }
 
       const quoteRequestMatch=url.pathname.match(/^\/api\/service-requests\/(\d+)\/quote$/);
@@ -250,7 +250,7 @@ export default {
         const user:any=await sessionUser(request,db); if(!user)return json({error:'Sessão inválida.'},{status:401}); const requestId=Number(reqStatusMatch[1]); const b=await readBody(request); const action=String(b.action||''); const reqRow:any=await db.prepare('SELECT * FROM service_requests WHERE id=?').bind(requestId).first(); if(!reqRow)return json({error:'Solicitação não encontrada.'},{status:404});
         if(user.role==='provider'){
           const provider:any=await providerForUser(db,user.id); if(!provider||Number(reqRow.target_provider_id)!==Number(provider.id))return json({error:'Sem permissão.'},{status:403});
-          const allowed:Record<string,{from:string[],to:string}>={start:{from:['accepted'],to:'in_progress'},complete:{from:['in_progress','accepted'],to:'completed'},cancel:{from:['open','quoted','accepted'],to:'cancelled'}}; const rule=allowed[action]; if(!rule||!rule.from.includes(reqRow.status))return json({error:'Ação não permitida para o status atual.'},{status:409});
+          const allowed:Record<string,{from:string[],to:string}>={start:{from:['accepted'],to:'in_progress'},complete:{from:['in_progress','accepted'],to:'completed'},cancel:{from:['open','quoted','accepted'],to:'cancelled'}}; const rule=allowed[action]; if(!rule)return json({error:'Ação inválida.'},{status:400}); if(reqRow.status===rule.to)return json({ok:true,status:reqRow.status,unchanged:true}); if(!rule.from.includes(reqRow.status))return json({error:`Não é possível ${action==='start'?'iniciar':'concluir'} um serviço com status ${reqRow.status}. Atualize a tela e tente novamente.`},{status:409});
           await db.prepare('UPDATE service_requests SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(rule.to,requestId).run(); return json({ok:true,status:rule.to});
         }
         if(Number(reqRow.client_id)!==Number(user.id))return json({error:'Sem permissão.'},{status:403}); if(action!=='cancel'||!['open','quoted'].includes(reqRow.status))return json({error:'Esta solicitação não pode mais ser cancelada pelo cliente.'},{status:409}); await db.prepare(`UPDATE service_requests SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(requestId).run(); return json({ok:true,status:'cancelled'});
@@ -308,10 +308,21 @@ export default {
         if(type==='text'&&!message)return json({error:'Digite uma mensagem.'},{status:400}); if(type==='location'){lat=Number(b.latitude);lng=Number(b.longitude);if(!Number.isFinite(lat)||!Number.isFinite(lng))return json({error:'Localização inválida.'},{status:400});message=message||'Localização compartilhada pelo cliente.';}
         const result:any=await db.prepare(`INSERT INTO chat_messages(chat_id,sender_user_id,message_type,message,latitude,longitude,created_at) VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP)`).bind(chat.id,user.id,type,message,lat,lng).run(); await db.prepare('UPDATE service_chats SET updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(chat.id).run(); return json({ok:true,id:result.meta?.last_row_id||null},{status:201});
       }
+      const chatVisibilityMatch=url.pathname.match(/^\/api\/service-requests\/(\d+)\/chat\/visibility$/);
+      if(chatVisibilityMatch&&request.method==='POST'){
+        const user:any=await sessionUser(request,db); if(!user)return json({error:'Sessão inválida ou expirada.'},{status:401}); const requestId=Number(chatVisibilityMatch[1]); const b=await readBody(request); const hidden=b.hidden===true||b.hidden===1||b.hidden==='1';
+        const row:any=await db.prepare('SELECT sr.client_id,sr.target_provider_id FROM service_requests sr WHERE sr.id=?').bind(requestId).first(); if(!row)return json({error:'Solicitação não encontrada.'},{status:404}); const provider:any=user.role==='provider'?await providerForUser(db,user.id):null; const isClient=Number(row.client_id)===Number(user.id); const isProvider=provider&&Number(row.target_provider_id)===Number(provider.id); if(!isClient&&!isProvider)return json({error:'Sem permissão para esta conversa.'},{status:403});
+        await db.prepare(`INSERT OR IGNORE INTO service_chats(request_id,status,client_hidden,provider_hidden,created_at,updated_at) VALUES(?,'open',0,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).bind(requestId).run(); const column=isClient?'client_hidden':'provider_hidden'; await db.prepare(`UPDATE service_chats SET ${column}=?,updated_at=CURRENT_TIMESTAMP WHERE request_id=?`).bind(hidden?1:0,requestId).run(); return json({ok:true,hidden});
+      }
+
       const chatCloseMatch=url.pathname.match(/^\/api\/service-requests\/(\d+)\/chat\/close$/);
       if(chatCloseMatch&&request.method==='POST'){
         const user:any=await sessionUser(request,db); if(!user||user.role!=='client')return json({error:'Somente o cliente pode encerrar o chat.'},{status:403}); const requestId=Number(chatCloseMatch[1]); const row:any=await db.prepare('SELECT id,client_id,status FROM service_requests WHERE id=?').bind(requestId).first(); if(!row||Number(row.client_id)!==Number(user.id))return json({error:'Solicitação não encontrada.'},{status:404}); if(!['accepted','in_progress','completed'].includes(row.status))return json({error:'Este chat ainda não pode ser encerrado.'},{status:409});
         await db.prepare(`UPDATE service_chats SET status='closed',closed_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE request_id=?`).bind(user.id,requestId).run(); return json({ok:true,status:'closed'});
+      }
+
+      if(url.pathname==='/api/provider/availability'&&request.method==='POST'){
+        const user:any=await sessionUser(request,db); if(!user||user.role!=='provider')return json({error:'Acesso exclusivo do prestador.'},{status:403}); const provider:any=await providerForUser(db,user.id); if(!provider)return json({error:'Perfil não encontrado.'},{status:404}); const b=await readBody(request); const available=b.available===true||b.available===1||b.available==='1'; await db.prepare('UPDATE provider_profiles SET available=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(available?1:0,provider.id).run(); return json({ok:true,available:available?1:0});
       }
 
       if(url.pathname==='/api/provider/profile'&&request.method==='PUT'){

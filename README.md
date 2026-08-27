@@ -28,3 +28,20 @@ Aplique as migrations na ordem. Para atualizar uma instalação v0.8 para v0.9, 
 Mantenha o binding D1 `DB` conectado ao banco `servperto-db` e o binding `ASSETS` configurado pelo `wrangler.jsonc`.
 
 Após o deploy, teste `/api/schema-health`. O retorno deve conter `"ok": true`.
+
+
+## v0.9.1
+- Corrige erro do chat `Cannot read properties of null (reading reset)` preservando a referência do formulário antes da operação assíncrona.
+- Reorganiza os cards de profissionais no painel do cliente para evitar informações cortadas.
+- Exibe nome, avaliação, categoria, cidade, distância, disponibilidade e descrição de forma responsiva.
+
+
+## ServPerto v0.9.2
+- Mapa do cliente filtrado automaticamente pela categoria selecionada.
+- Ordenação por proximidade ao usar a localização do cliente.
+- Marcadores do mapa usam a foto do profissional quando disponível.
+- Favoritos com estado visual e remoção rápida.
+- Prestador pode alternar Disponível/Indisponível no painel.
+- Chat pode ser ocultado individualmente por cliente ou prestador.
+- Transições iniciar/concluir serviço idempotentes.
+- Aplicar migrations/0005_marketplace_experience.sql no D1 antes do deploy.
