@@ -50,46 +50,6 @@ function publicCoordinates(lat: number | null, lng: number | null, exact: boolea
 function roleFromPayload(value: unknown) { return value === 'professional' || value === 'provider' ? 'provider' : 'client'; }
 function money(value: unknown) { const n = Number(value); return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null; }
 
-
-async function geocodeAddress(address: string, cep: string, city: string, state = 'AM') {
-  const cleanAddress = String(address || '').trim();
-  const cleanCep = String(cep || '').trim();
-  const cleanCity = String(city || '').trim();
-  const cleanState = String(state || 'AM').trim() || 'AM';
-  const queries = (!cleanCep && !cleanCity)
-    ? [cleanAddress]
-    : Array.from(new Set([
-        [cleanAddress, cleanCep, cleanCity, cleanState, 'Brasil'].filter(Boolean).join(', '),
-        [cleanAddress, cleanCity, cleanState, 'Brasil'].filter(Boolean).join(', '),
-        [cleanCep, cleanCity, cleanState, 'Brasil'].filter(Boolean).join(', ')
-      ].filter(q => q.length >= 3)));
-
-  for (const q of queries) {
-    try {
-      const endpoint = new URL('https://nominatim.openstreetmap.org/search');
-      endpoint.searchParams.set('q', q);
-      endpoint.searchParams.set('format', 'jsonv2');
-      endpoint.searchParams.set('limit', '1');
-      endpoint.searchParams.set('countrycodes', 'br');
-      endpoint.searchParams.set('addressdetails', '1');
-      const res = await fetch(endpoint.toString(), {
-        headers: {
-          'User-Agent': 'ServPerto/1.2.1 (Cloudflare Worker)',
-          'Accept-Language': 'pt-BR,pt;q=0.9'
-        }
-      });
-      if (!res.ok) continue;
-      const rows: any[] = await res.json();
-      const hit = rows?.[0];
-      const latitude = Number(hit?.lat); const longitude = Number(hit?.lon);
-      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-        return { latitude, longitude, displayName: hit.display_name || q, query: q };
-      }
-    } catch {}
-  }
-  return null;
-}
-
 async function sessionUser(request: Request, db: D1Database) {
   const auth = request.headers.get('authorization') || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
@@ -123,14 +83,14 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     try {
-      if (url.pathname === '/api/health') return json({ ok: true, app: 'ServPerto', version: '1.2.1', runtime: 'Cloudflare Workers', database: Boolean(env.DB) });
+      if (url.pathname === '/api/health') return json({ ok: true, app: 'ServPerto', version: '1.3.0', runtime: 'Cloudflare Workers', database: Boolean(env.DB) });
       if (url.pathname.startsWith('/api/') && !env.DB) return json({ error: 'Banco D1 não vinculado. Adicione o binding DB ao Worker servperto.' }, { status: 503 });
       const db = env.DB;
 
       if (url.pathname === '/api/db-health') {
         const row: any = await db.prepare("SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table'").first();
         const users: any = await db.prepare('SELECT COUNT(*) AS total FROM users').first();
-        return json({ ok: true, database: true, tables: Number(row?.total || 0), users: Number(users?.total || 0), version: '1.2.1' });
+        return json({ ok: true, database: true, tables: Number(row?.total || 0), users: Number(users?.total || 0), version: '1.3.0' });
       }
 
       if (url.pathname === '/api/schema-health') {
@@ -155,7 +115,7 @@ export default {
           if (!columns.length || missing.length) healthy = false;
           report[table] = { exists: columns.length > 0, missing };
         }
-        return json({ ok: healthy, database: true, version: '1.2.1', schema: report }, { status: healthy ? 200 : 500 });
+        return json({ ok: healthy, database: true, version: '1.3.0', schema: report }, { status: healthy ? 200 : 500 });
       }
 
       if (url.pathname === '/api/auth/register' && request.method === 'POST') {
@@ -167,12 +127,7 @@ export default {
         if (await db.prepare('SELECT id FROM users WHERE username=?').bind(username).first()) return json({ error: 'Este nome de login já está em uso.' }, { status: 409 });
 
         const recoveryCode = makeRecoveryCode(); const passwordHash = await hashSecret(String(b.password)); const recoveryHash = await hashSecret(recoveryCode);
-        let lat = Number.isFinite(Number(b.latitude)) ? Number(b.latitude) : null; let lng = Number.isFinite(Number(b.longitude)) ? Number(b.longitude) : null;
-        let locationSource = lat != null && lng != null ? 'gps' : 'none';
-        if (role === 'provider' && (lat == null || lng == null)) {
-          const geocoded = await geocodeAddress(String(b.address || ''), String(b.cep || ''), String(b.city || ''), 'AM');
-          if (geocoded) { lat = geocoded.latitude; lng = geocoded.longitude; locationSource = 'address'; }
-        }
+        const lat = Number.isFinite(Number(b.latitude)) ? Number(b.latitude) : null; const lng = Number.isFinite(Number(b.longitude)) ? Number(b.longitude) : null;
         const exact = b.showExactLocation === '1' || b.showExactLocation === true; const pub = publicCoordinates(lat, lng, exact);
         let userId: number | null = null; let stage = 'users';
         try {
@@ -192,7 +147,7 @@ export default {
               for (const title of titles) await db.prepare(`INSERT INTO provider_services(provider_id,category_id,title,description,active,created_at,updated_at) VALUES(?,?,?,?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).bind(providerId,category.id,title,String(b.description || '').trim()).run();
             }
           }
-          return json({ ok: true, role, recoveryCode, locationSource, locationResolved: role !== 'provider' || (pub.lat != null && pub.lng != null) }, { status: 201 });
+          return json({ ok: true, role, recoveryCode }, { status: 201 });
         } catch (e:any) {
           if (userId) try { await db.prepare('DELETE FROM users WHERE id=?').bind(userId).run(); } catch {}
           return json({ error: 'Não foi possível criar o cadastro.', detail: `Falha na etapa ${stage}: ${String(e?.message || e)}` }, { status: 500 });
@@ -238,7 +193,9 @@ export default {
 
       if (url.pathname === '/api/geocode' && request.method === 'GET') {
         const q=String(url.searchParams.get('q')||'').trim(); if(q.length<3||q.length>220) return json({error:'Endereço inválido.'},{status:400});
-        const hit=await geocodeAddress(q,'','',''); if(!hit)return json({error:'Endereço não encontrado.'},{status:404}); return json({ok:true,latitude:hit.latitude,longitude:hit.longitude,displayName:hit.displayName,source:'OpenStreetMap/Nominatim'});
+        const endpoint=new URL('https://nominatim.openstreetmap.org/search'); endpoint.searchParams.set('q',q); endpoint.searchParams.set('format','jsonv2'); endpoint.searchParams.set('limit','1'); endpoint.searchParams.set('countrycodes','br'); endpoint.searchParams.set('addressdetails','1');
+        const res=await fetch(endpoint.toString(),{headers:{'User-Agent':'ServPerto/0.9 (Cloudflare Worker)','Accept-Language':'pt-BR,pt;q=0.9'}}); if(!res.ok)return json({error:'Serviço de localização temporariamente indisponível.'},{status:502});
+        const rows:any[]=await res.json(); const hit=rows?.[0]; if(!hit)return json({error:'Endereço não encontrado.'},{status:404}); return json({ok:true,latitude:Number(hit.lat),longitude:Number(hit.lon),displayName:hit.display_name||null,source:'OpenStreetMap/Nominatim'});
       }
 
       const proMatch=url.pathname.match(/^\/api\/professionals\/(\d+)$/);
@@ -413,21 +370,19 @@ export default {
       if(adminReviewDelete&&request.method==='DELETE'){
         const admin:any=await sessionUser(request,db); if(!admin||admin.role!=='admin')return json({error:'Acesso exclusivo do suporte.'},{status:403}); const reviewId=Number(adminReviewDelete[1]); const review:any=await db.prepare('SELECT id,provider_id FROM reviews WHERE id=?').bind(reviewId).first(); if(!review)return json({error:'Avaliação não encontrada.'},{status:404}); await db.prepare('DELETE FROM reviews WHERE id=?').bind(reviewId).run(); await refreshProviderRating(db,Number(review.provider_id)); return json({ok:true});
       }
-      const adminGeocode=url.pathname.match(/^\/api\/admin\/providers\/(\d+)\/geocode$/);
-      if(adminGeocode&&request.method==='POST'){
-        const admin:any=await sessionUser(request,db); if(!admin||admin.role!=='admin')return json({error:'Acesso exclusivo do suporte.'},{status:403}); const providerId=Number(adminGeocode[1]); const provider:any=await db.prepare(`SELECT pp.id,pp.exact_location_public,u.address,u.cep,u.city,u.state FROM provider_profiles pp JOIN users u ON u.id=pp.user_id WHERE pp.id=?`).bind(providerId).first(); if(!provider)return json({error:'Prestador não encontrado.'},{status:404});
-        const hit=await geocodeAddress(String(provider.address||''),String(provider.cep||''),String(provider.city||''),String(provider.state||'AM')); if(!hit)return json({error:'Não foi possível localizar o endereço cadastrado deste prestador.'},{status:404}); const pub=publicCoordinates(hit.latitude,hit.longitude,Boolean(provider.exact_location_public)); await db.prepare('UPDATE provider_profiles SET latitude=?,longitude=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(pub.lat,pub.lng,providerId).run(); return json({ok:true,latitude:pub.lat,longitude:pub.lng,displayName:hit.displayName});
-      }
-
       const adminVerified=url.pathname.match(/^\/api\/admin\/providers\/(\d+)\/verified$/);
       if(adminVerified&&request.method==='POST'){
         const admin:any=await sessionUser(request,db); if(!admin||admin.role!=='admin')return json({error:'Acesso exclusivo do suporte.'},{status:403}); const b=await readBody(request); const verified=b.verified===true||b.verified===1||b.verified==='1'; await db.prepare('UPDATE provider_profiles SET verified=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(verified?1:0,Number(adminVerified[1])).run(); return json({ok:true,verified});
       }
 
-      if(url.pathname==='/api/provider/location-from-address'&&request.method==='POST'){
-        const user:any=await sessionUser(request,db); if(!user||user.role!=='provider')return json({error:'Acesso exclusivo do prestador.'},{status:403}); const provider:any=await providerForUser(db,user.id); if(!provider)return json({error:'Perfil não encontrado.'},{status:404});
-        const hit=await geocodeAddress(String(provider.address||''),String(provider.cep||''),String(provider.city||''),String(provider.state||'AM')); if(!hit)return json({error:'Não foi possível localizar o endereço cadastrado. Confira rua, número, bairro e CEP.'},{status:404});
-        const pub=publicCoordinates(hit.latitude,hit.longitude,Boolean(provider.exact_location_public)); await db.prepare('UPDATE provider_profiles SET latitude=?,longitude=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(pub.lat,pub.lng,provider.id).run(); return json({ok:true,latitude:pub.lat,longitude:pub.lng,displayName:hit.displayName});
+      if(url.pathname==='/api/provider/location'&&request.method==='POST'){
+        const user:any=await sessionUser(request,db); if(!user||user.role!=='provider')return json({error:'Acesso exclusivo do prestador.'},{status:403});
+        const provider:any=await providerForUser(db,user.id); if(!provider)return json({error:'Perfil não encontrado.'},{status:404});
+        const b=await readBody(request); const latitude=Number(b.latitude); const longitude=Number(b.longitude); const accuracy=Number(b.accuracy||0);
+        if(!Number.isFinite(latitude)||!Number.isFinite(longitude)||latitude < -90||latitude > 90||longitude < -180||longitude > 180)return json({error:'Coordenadas de GPS inválidas.'},{status:400});
+        if(accuracy && (!Number.isFinite(accuracy)||accuracy<0||accuracy>100000))return json({error:'Precisão de localização inválida.'},{status:400});
+        await db.prepare('UPDATE provider_profiles SET latitude=?,longitude=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(latitude,longitude,provider.id).run();
+        return json({ok:true,latitude,longitude,accuracy:accuracy||null,message:'Localização do mapa atualizada pelo GPS.'});
       }
 
       if(url.pathname==='/api/provider/profile'&&request.method==='PUT'){

@@ -70,9 +70,9 @@ Antes de usar o painel de suporte, execute **uma vez** no D1 o arquivo:
 A conta administrativa criada pela migração usa o login `suporte.servperto`. A senha temporária e o código de recuperação não ficam em texto puro dentro do repositório.
 
 
-## v1.2.1 — Localização automática pelo endereço
-- No cadastro de prestador, GPS continua sendo a primeira opção.
-- Se o GPS não for usado, o Worker geocodifica automaticamente endereço + CEP + cidade e grava as coordenadas no perfil profissional.
-- Prestadores já existentes podem usar **Atualizar localização pelo endereço** em Meu perfil.
-- O suporte pode usar **Atualizar mapa** na lista de contas para corrigir a localização de um prestador existente.
-- Não exige nova migração do D1.
+## v1.3 - Localização do prestador por GPS
+- O marcador do prestador no mapa agora pode ser atualizado diretamente no painel **Meu perfil**.
+- Botão: **Atualizar minha localização pelo GPS**.
+- A plataforma usa `navigator.geolocation` com alta precisão e grava latitude/longitude em `provider_profiles`.
+- O endereço cadastrado continua sendo um dado de perfil, mas não é usado para reposicionar o marcador no mapa.
+- Esta atualização não exige nova migração D1.
