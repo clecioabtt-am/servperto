@@ -68,3 +68,11 @@ Antes de usar o painel de suporte, execute **uma vez** no D1 o arquivo:
 `migrations/0006_support_admin.sql`
 
 A conta administrativa criada pela migração usa o login `suporte.servperto`. A senha temporária e o código de recuperação não ficam em texto puro dentro do repositório.
+
+
+## v1.2.1 — Localização automática pelo endereço
+- No cadastro de prestador, GPS continua sendo a primeira opção.
+- Se o GPS não for usado, o Worker geocodifica automaticamente endereço + CEP + cidade e grava as coordenadas no perfil profissional.
+- Prestadores já existentes podem usar **Atualizar localização pelo endereço** em Meu perfil.
+- O suporte pode usar **Atualizar mapa** na lista de contas para corrigir a localização de um prestador existente.
+- Não exige nova migração do D1.
