@@ -70,9 +70,23 @@ Antes de usar o painel de suporte, execute **uma vez** no D1 o arquivo:
 A conta administrativa criada pela migração usa o login `suporte.servperto`. A senha temporária e o código de recuperação não ficam em texto puro dentro do repositório.
 
 
-## v1.3 - Localização do prestador por GPS
+## v1.4 - Localização do prestador por GPS
 - O marcador do prestador no mapa agora pode ser atualizado diretamente no painel **Meu perfil**.
 - Botão: **Atualizar minha localização pelo GPS**.
 - A plataforma usa `navigator.geolocation` com alta precisão e grava latitude/longitude em `provider_profiles`.
 - O endereço cadastrado continua sendo um dado de perfil, mas não é usado para reposicionar o marcador no mapa.
 - Esta atualização não exige nova migração D1.
+
+
+## v1.4 — Localização ao vivo, presença e privacidade
+- Prestador pode iniciar/parar compartilhamento de localização em tempo real pelo GPS.
+- Prestador pode ocultar ou desocultar sua localização do mapa.
+- O mapa consulta novas posições periodicamente para atualizar marcadores ativos.
+- Painel do prestador mostra total de clientes, online e offline.
+- Cliente é considerado online quando o painel autenticado envia presença nos últimos 2 minutos.
+- Cliente e prestador podem escolher se o número de WhatsApp fica visível.
+- Privacidade é respeitada nas APIs: coordenadas ocultas e WhatsApp oculto não são enviados publicamente.
+
+> Importante: em navegadores/PWA, a localização em tempo real funciona enquanto a página/app permanece ativa. iOS e alguns Androids podem suspender geolocalização em segundo plano ou com a tela bloqueada.
+
+Antes do deploy execute `migrations/0007_realtime_privacy_presence.sql` uma única vez no D1 `servperto-db`.
