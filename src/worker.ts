@@ -22,6 +22,11 @@ function makeRecoveryCode() {
   const n = crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000;
   return String(n).padStart(6, '0');
 }
+function makeTemporaryPassword() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return [...bytes].map(value => alphabet[value % alphabet.length]).join('');
+}
 function randomHex(bytes = 16) {
   const a = crypto.getRandomValues(new Uint8Array(bytes));
   return [...a].map(x => x.toString(16).padStart(2, '0')).join('');
@@ -83,7 +88,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     try {
-      if (url.pathname === '/api/health') return json({ ok: true, app: 'ServPerto', version: '1.4.0', runtime: 'Cloudflare Workers', database: Boolean(env.DB) });
+      if (url.pathname === '/api/health') return json({ ok: true, app: 'ServPerto', version: '1.5.0', runtime: 'Cloudflare Workers', database: Boolean(env.DB) });
       if (url.pathname.startsWith('/api/') && !env.DB) return json({ error: 'Banco D1 não vinculado. Adicione o binding DB ao Worker servperto.' }, { status: 503 });
       const db = env.DB;
 
@@ -115,7 +120,7 @@ export default {
           if (!columns.length || missing.length) healthy = false;
           report[table] = { exists: columns.length > 0, missing };
         }
-        return json({ ok: healthy, database: true, version: '1.4.0', schema: report }, { status: healthy ? 200 : 500 });
+        return json({ ok: healthy, database: true, version: '1.5.0', schema: report }, { status: healthy ? 200 : 500 });
       }
 
       if (url.pathname === '/api/auth/register' && request.method === 'POST') {
@@ -407,6 +412,27 @@ export default {
       const adminUserStatus=url.pathname.match(/^\/api\/admin\/users\/(\d+)\/status$/);
       if(adminUserStatus&&request.method==='POST'){
         const admin:any=await sessionUser(request,db); if(!admin||admin.role!=='admin')return json({error:'Acesso exclusivo do suporte.'},{status:403}); const userId=Number(adminUserStatus[1]); if(userId===Number(admin.id))return json({error:'Você não pode desativar sua própria conta administrativa.'},{status:409}); const b=await readBody(request); const active=b.active===true||b.active===1||b.active==='1'; const target:any=await db.prepare('SELECT id,role FROM users WHERE id=?').bind(userId).first(); if(!target)return json({error:'Conta não encontrada.'},{status:404}); await db.prepare('UPDATE users SET active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(active?1:0,userId).run(); if(target.role==='provider'&&!active)await db.prepare('UPDATE provider_profiles SET available=0,updated_at=CURRENT_TIMESTAMP WHERE user_id=?').bind(userId).run(); if(!active)await db.prepare('DELETE FROM sessions WHERE user_id=?').bind(userId).run(); return json({ok:true,active});
+      }
+      const adminUserSecurity=url.pathname.match(/^\/api\/admin\/users\/(\d+)\/security$/);
+      if(adminUserSecurity&&request.method==='POST'){
+        const admin:any=await sessionUser(request,db);
+        if(!admin||admin.role!=='admin')return json({error:'Acesso exclusivo do suporte.'},{status:403});
+        const userId=Number(adminUserSecurity[1]);
+        const target:any=await db.prepare('SELECT id,full_name,username,role,active FROM users WHERE id=?').bind(userId).first();
+        if(!target)return json({error:'Conta não encontrada.'},{status:404});
+        const b=await readBody(request);
+        if(b.action==='recovery_code'){
+          const recoveryCode=makeRecoveryCode();
+          await db.prepare('UPDATE users SET recovery_code_hash=?,recovery_attempts=0,recovery_locked_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(await hashSecret(recoveryCode),userId).run();
+          return json({ok:true,username:target.username,recoveryCode,notice:'Este código é exibido somente agora. Oriente o usuário a guardá-lo em local seguro.'});
+        }
+        if(b.action==='temporary_password'){
+          const temporaryPassword=makeTemporaryPassword();
+          await db.prepare('UPDATE users SET password_hash=?,recovery_attempts=0,recovery_locked_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(await hashSecret(temporaryPassword),userId).run();
+          await db.prepare('DELETE FROM sessions WHERE user_id=?').bind(userId).run();
+          return json({ok:true,username:target.username,temporaryPassword,notice:'A senha temporária é exibida somente agora. As sessões anteriores foram encerradas.'});
+        }
+        return json({error:'Ação de segurança inválida.'},{status:400});
       }
       if(url.pathname==='/api/admin/reviews'&&request.method==='GET'){
         const admin:any=await sessionUser(request,db); if(!admin||admin.role!=='admin')return json({error:'Acesso exclusivo do suporte.'},{status:403}); const out:any=await db.prepare(`SELECT r.id,r.rating,r.comment,r.created_at,r.provider_id,cu.full_name AS client_name,COALESCE(pp.professional_name,pu.full_name) AS provider_name FROM reviews r JOIN users cu ON cu.id=r.client_id JOIN provider_profiles pp ON pp.id=r.provider_id JOIN users pu ON pu.id=pp.user_id ORDER BY r.created_at DESC LIMIT 500`).all(); return json({reviews:out.results||[]});

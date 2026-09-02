@@ -90,3 +90,14 @@ A conta administrativa criada pela migração usa o login `suporte.servperto`. A
 > Importante: em navegadores/PWA, a localização em tempo real funciona enquanto a página/app permanece ativa. iOS e alguns Androids podem suspender geolocalização em segundo plano ou com a tela bloqueada.
 
 Antes do deploy execute `migrations/0007_realtime_privacy_presence.sql` uma única vez no D1 `servperto-db`.
+
+## v1.5 — Administração de acessos
+
+- Painel de suporte reorganizado com área **Acessos**;
+- consulta do nome de login de clientes e prestadores;
+- geração de novo código de recuperação de 6 dígitos;
+- criação de senha temporária exibida uma única vez;
+- encerramento automático das sessões antigas quando uma senha temporária é criada;
+- senhas atuais continuam protegidas por hash e nunca são expostas pelo sistema.
+
+Antes do deploy, execute `migrations/0008_admin_security.sql` uma única vez no D1 `servperto-db`. Essa migration define o código inicial de recuperação entregue separadamente ao responsável pelo perfil `suporte.servperto`.
